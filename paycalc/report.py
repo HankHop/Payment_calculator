@@ -129,7 +129,8 @@ def _monthly_lines(sc: Scenario, label: str, expenses, show_post: bool) -> List[
         out.append("  " + f"{_MONTHS[m['month']]:<6}" + "".join(f"{m[k]:>15,.2f}" for _, k in cols))
     out.append("  " + f"{'Total':<6}" + "".join(f"{sum(m[k] for m in rows):>15,.2f}" for _, k in cols))
     out.append("  * Cost = how much your take-home drops because of the contribution. Pretax is cheaper "
-               "than its face amount because it lowers taxes; post-tax costs its full amount.")
+               "than its face amount because it lowers taxes"
+               + ("; post-tax costs its full amount." if show_post else "."))
     if expenses is not None:
         out.append(f"  From savings = monthly expenses ({_m(expenses)}) minus net pay, when net pay falls short.")
     return out
