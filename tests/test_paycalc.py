@@ -114,8 +114,8 @@ class TestSchedule(unittest.TestCase):
     def test_bonus_percent_uses_salary_in_effect(self):
         cfg = cfg_from(pay={"raise": {"effective_date": "2026-03-01", "new_salary": 110000},
                             "bonus": {"pay_date": "2026-04-10", "percent_of_salary": 10}})
-        bonus = [e for e in build_events(cfg) if e.kind == "bonus"][0]
-        self.assertAlmostEqual(bonus.gross, 11000)
+        bonus = [e for e in build_events(cfg) if e.bonus_amount][0]
+        self.assertAlmostEqual(bonus.bonus_amount, 11000)
 
 
 class TestSimulation(unittest.TestCase):
@@ -284,7 +284,7 @@ class TestAfterTax(unittest.TestCase):
         a = analyze(cfg)
         # 100% of gross cannot be deducted; taxes still have to be paid.
         self.assertLess(a.current.result.posttax, 0.8 * 150000)
-        self.assertTrue(any("take-home" in w for w in a.warnings))
+        self.assertTrue(any("left to deduct" in w for w in a.warnings))
         for r in a.current.result.rows:
             self.assertGreaterEqual(r.gross - r.pretax - r.posttax, 0)
 
@@ -318,7 +318,7 @@ class TestAfterTax(unittest.TestCase):
         self.assertGreater(rec.result.total_additions, 72000 - 0.01 * 150000 - 1)
         self.assertAlmostEqual(rec.result.pretax, 24500, delta=0.01 * 150000)
         self.assertEqual({r.pay_date for r in rec.result.rows if r.posttax > 0},
-                         {r.pay_date for r in rec.result.rows if r.kind == "regular"})
+                         {r.pay_date for r in rec.result.rows if r.kind != "bonus"})
 
     def test_recommendation_pretax_fills_remaining_elective(self):
         cfg = after_tax_cfg(as_of_date="2026-06-30")
@@ -374,6 +374,91 @@ class TestMegaBackdoorAcknowledgement(unittest.TestCase):
     def test_non_boolean_acknowledgement_rejected(self):
         with self.assertRaises(config.ConfigError):
             after_tax_cfg(contributions={"posttax_type": "after_tax", "acknowledge_mega_backdoor": "yes"})
+
+
+def bonus_month_cfg(**overrides):
+    base = dict(
+        state="TX",
+        pay={"base_salary": 150000, "bonus": {"pay_date": "2026-03-13", "amount": 30000}},
+        deductions={"hsa_per_paycheck": 150, "hsa_coverage": "family", "other_pretax_per_paycheck": 200,
+                    "other_posttax_per_paycheck": 25},
+        contributions={"posttax_type": "after_tax", "acknowledge_mega_backdoor": True,
+                       "elections": [{"effective_date": "2026-01-02", "pretax_percent": 20, "posttax_percent": 80}]})
+    base.update(overrides)
+    return cfg_from(**base)
+
+
+class TestRealLifeDeductions(unittest.TestCase):
+    def test_hsa_and_premiums_reduce_tax_and_fica(self):
+        plain = taxes.summarize(100000, 0, "single", FED, data.state(2026, "CO"))
+        withd = taxes.summarize(100000, 0, "single", FED, data.state(2026, "CO"), hsa=3000, other_pretax=2000)
+        self.assertAlmostEqual(plain.federal - withd.federal, 5000 * 0.22, places=2)
+        self.assertAlmostEqual(plain.social_security - withd.social_security, 5000 * 0.062, places=2)
+        self.assertAlmostEqual(plain.medicare - withd.medicare, 5000 * 0.0145, places=2)
+        self.assertAlmostEqual(plain.state - withd.state, 5000 * 0.044, places=2)
+
+    def test_california_and_new_jersey_tax_hsa_but_not_premiums(self):
+        ca = data.state(2026, "CA")
+        a = taxes.summarize(100000, 0, "single", FED, ca)
+        b = taxes.summarize(100000, 0, "single", FED, ca, hsa=3000)
+        self.assertAlmostEqual(a.state, b.state)
+        c = taxes.summarize(100000, 0, "single", FED, ca, other_pretax=3000)
+        self.assertLess(c.state, a.state)
+
+    def test_deductions_not_taken_from_off_cycle_bonus(self):
+        cfg = bonus_month_cfg(pay={"bonus": {"pay_date": "2026-04-10", "amount": 5000, "separate_paycheck": True}})
+        ev = [e for e in build_events(cfg) if e.kind == "bonus"][0]
+        self.assertEqual((ev.hsa, ev.other_pretax, ev.other_posttax), (0, 0, 0))
+
+    def test_bonus_on_payday_joins_regular_paycheck(self):
+        cfg = bonus_month_cfg()
+        events = build_events(cfg)
+        merged = [e for e in events if e.kind == "regular+bonus"]
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].pay_date, date(2026, 3, 13))
+        self.assertAlmostEqual(merged[0].gross, 150000 / 26 + 30000)
+        self.assertAlmostEqual(merged[0].deferral_comp, 150000 / 26)   # bonus not eligible
+        self.assertEqual(len(events), 26)
+
+    def test_100_percent_election_takes_what_is_left(self):
+        a = analyze(bonus_month_cfg())
+        for r in a.current.result.rows:
+            net_before_post = r.posttax_available
+            self.assertLessEqual(r.posttax, net_before_post + 0.01)
+            self.assertGreaterEqual(net_before_post - r.posttax, -0.01)
+
+    def test_bonus_month_covers_full_election_others_are_capped(self):
+        a = analyze(bonus_month_cfg())
+        rows = {r.pay_date: r for r in a.current.result.rows}
+        bonus_row = rows[date(2026, 3, 13)]
+        self.assertAlmostEqual(bonus_row.posttax, bonus_row.posttax_requested)      # full election
+        self.assertGreater(bonus_row.posttax_available - bonus_row.posttax, 1000)    # money left over
+        normal = rows[date(2026, 2, 27)]
+        self.assertLess(normal.posttax, normal.posttax_requested)                    # capped
+        self.assertAlmostEqual(normal.posttax, normal.posttax_available)             # takes all that is left
+        text = report.text(a)
+        self.assertIn("POST-TAX ELECTION VS. AVAILABLE PAY - Current elections", text)
+        self.assertIn("full election met; includes bonus", text)
+        self.assertIn("limited by take-home", text)
+
+    def test_net_pay_subtracts_all_deductions(self):
+        a = analyze(bonus_month_cfg())
+        r, t = a.current.result, a.current.tax
+        self.assertAlmostEqual(a.current.net_pay,
+                               r.gross - r.employee - r.hsa - r.other_pretax - r.other_posttax - t.total)
+        self.assertAlmostEqual(r.hsa, 150 * 26)
+
+    def test_hsa_limit_warning(self):
+        a = analyze(bonus_month_cfg(deductions={"hsa_per_paycheck": 400, "hsa_coverage": "self"}))
+        self.assertTrue(any("HSA payroll contributions" in w for w in a.warnings))
+        ok = analyze(bonus_month_cfg(deductions={"hsa_per_paycheck": 150, "hsa_coverage": "family"}))
+        self.assertFalse(any("HSA payroll contributions" in w for w in ok.warnings))
+
+    def test_recommendation_accounts_for_deductions(self):
+        base = analyze(after_tax_cfg(as_of_date="2026-07-01"))
+        loaded = analyze(after_tax_cfg(as_of_date="2026-07-01",
+                                       deductions={"hsa_per_paycheck": 300, "other_pretax_per_paycheck": 400}))
+        self.assertLessEqual(loaded.recommendation.posttax_percent, base.recommendation.posttax_percent)
 
 
 class TestConfigValidation(unittest.TestCase):

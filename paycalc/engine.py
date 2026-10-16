@@ -21,7 +21,8 @@ class Scenario:
 
     @property
     def net_pay(self) -> float:
-        return self.result.gross - self.result.employee - self.tax.total
+        r = self.result
+        return (r.gross - r.employee - r.hsa - r.other_pretax - r.other_posttax - self.tax.total)
 
 
 @dataclass
@@ -36,15 +37,31 @@ class Analysis:
 
 
 def _scenario(label, cfg, events, fed, st, plan) -> Scenario:
-    """Taxes depend only on gross and pretax, so the take-home cap on after-tax contributions
-    (which needs the tax rate) can be applied in a second pass without circularity."""
+    """Taxes depend only on gross, pretax 401(k), HSA and premiums, so the take-home cap on
+    post-tax contributions (which needs the tax rate) is applied in a second pass without
+    circularity."""
+    def taxed(result):
+        return taxes.summarize(result.gross, result.pretax, cfg.filing_status, fed, st,
+                               result.hsa, result.other_pretax)
+
     result = simulate(events, plan)
-    tax = taxes.summarize(result.gross, result.pretax, cfg.filing_status, fed, st)
+    tax = taxed(result)
     uncapped = result.posttax
-    if plan.posttax_type == "after_tax" and plan.take_home_rate is None:
+    if plan.take_home_rate is None:
         plan = replace(plan, take_home_rate=tax.total / result.gross)
         result = simulate(events, plan)
     return Scenario(label, plan, result, tax, uncapped)
+
+
+def _hsa_limit(cfg: Config, fed: dict):
+    cov = cfg.deductions.hsa_coverage
+    if cov is None:
+        return None
+    h = fed["hsa"]
+    limit = h["self_only"] if cov == "self" else h["family"]
+    if cfg.age_end_of_year is not None and cfg.age_end_of_year >= 55:
+        limit += h["catch_up_55"]
+    return float(limit)
 
 
 def analyze(cfg: Config) -> Analysis:
@@ -63,7 +80,7 @@ def analyze(cfg: Config) -> Analysis:
             "an in-plan Roth conversion or in-service rollover to a Roth IRA (mega backdoor Roth). "
             "Set contributions.acknowledge_mega_backdoor to true to include them.")
     res = current.result
-    last_regular = max(e.pay_date for e in events if e.kind == "regular")
+    last_regular = max(e.pay_date for e in events if e.kind != "bonus")
     if res.limit_reached_on and res.limit_reached_on < last_regular:
         warnings.append(
             f"Current elections hit the elective limit on {res.limit_reached_on}; later paychecks "
@@ -76,9 +93,15 @@ def analyze(cfg: Config) -> Analysis:
         warnings.append("Current employee + employer contributions exceed the IRS 415(c) limit.")
     if current.uncapped_posttax - res.posttax > 1.0:
         warnings.append(
-            f"Current post-tax election asks for ${current.uncapped_posttax:,.0f} but take-home pay "
-            f"after pretax contributions and estimated taxes only covers ${res.posttax:,.0f}. "
-            f"Payroll will likely cap or reject the rest; figures here use the capped amount.")
+            f"Current post-tax elections ask for ${current.uncapped_posttax:,.0f}, but after estimated "
+            f"taxes, HSA, premiums and pretax contributions only ${res.posttax:,.0f} is left to deduct. "
+            f"Figures here use the amount actually deducted (elections near 100% take whatever remains).")
+    hsa_limit = _hsa_limit(cfg, fed)
+    if hsa_limit is not None and res.hsa > hsa_limit + 0.01:
+        warnings.append(f"HSA payroll contributions of ${res.hsa:,.0f} exceed the {cfg.tax_year} limit of "
+                        f"${hsa_limit:,.0f} (employer HSA contributions also count toward it).")
+    if res.hsa and st.get("taxes_hsa"):
+        warnings.append(f"{st['name']} does not exclude HSA contributions from state taxable income.")
     if st.get("note"):
         warnings.append(f"{st['name']}: {st['note']}")
     warnings.extend(rec.warnings)

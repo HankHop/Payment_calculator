@@ -67,27 +67,28 @@ def _idx(status: str) -> int:
     return 1 if status == "mfj" else 0
 
 
-def state_taxable(gross: float, pretax: float, status: str, st: dict) -> float:
+def state_taxable(gross: float, pretax: float, status: str, st: dict, excluded: float = 0.0) -> float:
+    """excluded: other payroll amounts the state excludes (Section 125 premiums, HSA)."""
     if st["type"] == "none":
         return 0.0
     i = _idx(status)
-    wages = gross if st.get("taxes_401k_deferrals") else gross - pretax
+    wages = gross - excluded - (0.0 if st.get("taxes_401k_deferrals") else pretax)
     deduction = (st.get("std") or [0, 0])[i]
     if st.get("exempt_type") == "deduction":
         deduction += (st.get("exempt") or [0, 0])[i]
     return max(0.0, wages - deduction)
 
 
-def state_income_tax(gross: float, pretax: float, status: str, st: dict) -> float:
+def state_income_tax(gross: float, pretax: float, status: str, st: dict, excluded: float = 0.0) -> float:
     if st["type"] == "none":
         return 0.0
-    tax = bracket_tax(state_taxable(gross, pretax, status, st), _pick(st["brackets"], status))
+    tax = bracket_tax(state_taxable(gross, pretax, status, st, excluded), _pick(st["brackets"], status))
     if st.get("exempt_type") == "credit":
         tax = max(0.0, tax - (st.get("exempt") or [0, 0])[_idx(status)])
     return tax
 
 
-def state_marginal(gross: float, pretax: float, status: str, st: dict) -> float:
+def state_marginal(gross: float, pretax: float, status: str, st: dict, excluded: float = 0.0) -> float:
     """Rate saved on the next pretax dollar. Zero for states that tax 401(k) deferrals."""
     if st["type"] == "none" or st.get("taxes_401k_deferrals"):
         return 0.0
@@ -95,10 +96,16 @@ def state_marginal(gross: float, pretax: float, status: str, st: dict) -> float:
     deduction = (st.get("std") or [0, 0])[i]
     if st.get("exempt_type") == "deduction":
         deduction += (st.get("exempt") or [0, 0])[i]
-    return marginal_rate(gross - pretax - deduction, _pick(st["brackets"], status))
+    return marginal_rate(gross - excluded - pretax - deduction, _pick(st["brackets"], status))
 
 
-# ---- combined ---------------------------------------------------------------
+# ---- combined
+
+def exclusions(hsa: float, other_pretax: float, st: dict) -> tuple:
+    """(amount excluded from federal income tax and FICA, amount excluded from state income tax)."""
+    sec125 = hsa + other_pretax
+    state = other_pretax + (0.0 if st.get("taxes_hsa") else hsa)
+    return sec125, state
 
 @dataclass(frozen=True)
 class TaxSummary:
@@ -117,16 +124,20 @@ class TaxSummary:
         return self.federal + self.state + self.social_security + self.medicare
 
 
-def summarize(gross: float, pretax: float, status: str, fed: dict, st: dict) -> TaxSummary:
-    f = fica(gross, status, fed)
+def summarize(gross: float, pretax: float, status: str, fed: dict, st: dict,
+              hsa: float = 0.0, other_pretax: float = 0.0) -> TaxSummary:
+    """pretax = employee pretax 401(k). hsa and other_pretax (Section 125) also reduce federal
+    taxable income and FICA wages; state treatment follows exclusions()."""
+    sec125, state_excl = exclusions(hsa, other_pretax, st)
+    f = fica(gross - sec125, status, fed)
     return TaxSummary(
         gross=gross,
         pretax=pretax,
-        federal_taxable=federal_taxable(gross, pretax, status, fed),
-        federal=federal_income_tax(gross, pretax, status, fed),
-        state=state_income_tax(gross, pretax, status, st),
+        federal_taxable=federal_taxable(gross - sec125, pretax, status, fed),
+        federal=federal_income_tax(gross - sec125, pretax, status, fed),
+        state=state_income_tax(gross, pretax, status, st, state_excl),
         social_security=f["social_security"],
         medicare=f["medicare"],
-        marginal_federal=federal_marginal(gross, pretax, status, fed),
-        marginal_state=state_marginal(gross, pretax, status, st),
+        marginal_federal=federal_marginal(gross - sec125, pretax, status, fed),
+        marginal_state=state_marginal(gross, pretax, status, st, state_excl),
     )

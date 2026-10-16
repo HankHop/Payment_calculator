@@ -25,6 +25,9 @@ def _rows(a: Analysis):
     return [
         ("PAY", "", ""),
         row("Gross pay", lambda s: s.result.gross),
+        *([row("HSA (payroll)", lambda s: s.result.hsa)] if cur.result.hsa else []),
+        *([row("Other pretax deductions", lambda s: s.result.other_pretax)] if cur.result.other_pretax else []),
+        *([row("Other post-tax deductions", lambda s: s.result.other_posttax)] if cur.result.other_posttax else []),
         ("CONTRIBUTIONS", "", ""),
         row("Pretax percent (going forward)", lambda s: s.plan.pretax_percent, _p),
         *([row(f"{post} percent (going forward)", lambda s: s.plan.posttax_percent, _p)] if show_post else []),
@@ -51,16 +54,44 @@ def _rows(a: Analysis):
     ]
 
 
+def _election_lines(sc: Scenario, label: str) -> List[str]:
+    """Per paycheck: what the post-tax election asks for, what pay is left to cover it after
+    taxes, HSA, premiums and pretax 401(k), what was deducted, and what stays in take-home."""
+    rows = [r for r in sc.result.rows if r.posttax_requested > 0.005]
+    if not rows:
+        return []
+    out = ["", f"POST-TAX ELECTION VS. AVAILABLE PAY - {label}",
+           f"  {'date':<12}{'elected':>11}{'available':>12}{'deducted':>11}{'left over':>11}  note"]
+    for r in rows:
+        avail = r.posttax_available or 0.0
+        if r.posttax >= r.posttax_requested - 0.005:
+            note = "full election met"
+        elif avail < r.posttax_requested - 0.005:
+            note = f"limited by take-home, {_m(r.posttax_requested - r.posttax)} of the election not deducted"
+        else:
+            note = "limited by the 415(c) total limit"
+        if "bonus" in r.kind:
+            note += "; includes bonus"
+        out.append(f"  {str(r.pay_date):<12}{r.posttax_requested:>11,.2f}{avail:>12,.2f}"
+                   f"{r.posttax:>11,.2f}{max(0.0, avail - r.posttax):>11,.2f}  {note}")
+    out.append(f"  {'total':<12}{sum(r.posttax_requested for r in rows):>11,.2f}"
+               f"{sum(r.posttax_available or 0.0 for r in rows):>12,.2f}"
+               f"{sum(r.posttax for r in rows):>11,.2f}"
+               f"{sum(max(0.0, (r.posttax_available or 0.0) - r.posttax) for r in rows):>11,.2f}")
+    return out
+
+
 def text(a: Analysis, schedule: bool = False) -> str:
     cfg = a.cfg
     out: List[str] = []
     out.append(f"{cfg.tax_year} estimate | filing status: {cfg.filing_status} | state: {a.state_name}")
-    out.append(f"Base salary {_m(cfg.base_salary)}, paid {cfg.frequency} ({len(a.events) - (1 if cfg.bonus else 0)} paychecks)")
+    out.append(f"Base salary {_m(cfg.base_salary)}, paid {cfg.frequency} ({sum(1 for e in a.events if e.kind != 'bonus')} paychecks)")
     if cfg.raise_:
         out.append(f"Raise to {_m(cfg.raise_.new_salary)} effective {cfg.raise_.effective_date}")
     if cfg.bonus:
-        bonus = next(e for e in a.events if e.kind == "bonus")
-        out.append(f"Bonus {_m(bonus.gross)} paid {cfg.bonus.pay_date}; "
+        paid_with = ("with the regular paycheck" if any(e.kind == "regular+bonus" for e in a.events)
+                     else "as its own paycheck")
+        out.append(f"Bonus {_m(sum(e.bonus_amount for e in a.events))} paid {cfg.bonus.pay_date} ({paid_with}); "
                    f"employee contributions on bonus: {'yes' if cfg.contributions.bonus_eligible_for_employee_contributions else 'no'}, "
                    f"match: {'yes' if cfg.contributions.employer.bonus_eligible_for_match else 'no'}, "
                    f"unmatched: {'yes' if cfg.contributions.employer.bonus_eligible_for_nonelective else 'no'}")
@@ -83,6 +114,9 @@ def text(a: Analysis, schedule: bool = False) -> str:
             out.append(label)
         else:
             out.append(f"  {label:<{w0 - 2}}{c:>{w1}}{r:>{w1 + 2}}")
+    if show_post:
+        out.extend(_election_lines(a.current, "Current elections"))
+        out.extend(_election_lines(a.recommended, "Recommended elections"))
     out.append("")
 
     rec = a.recommendation
@@ -126,5 +160,10 @@ def as_dict(a: Analysis) -> dict:
             "social_security": round(t.social_security, 2), "medicare": round(t.medicare, 2),
             "total_taxes": round(t.total, 2), "net_pay": round(s.net_pay, 2),
             "limit_reached_on": str(r.limit_reached_on) if r.limit_reached_on else None,
+            "posttax_by_paycheck": [
+                {"date": str(x.pay_date), "kind": x.kind, "elected": round(x.posttax_requested, 2),
+                 "available": round(x.posttax_available or 0.0, 2), "deducted": round(x.posttax, 2),
+                 "left_over": round(max(0.0, (x.posttax_available or 0.0) - x.posttax), 2)}
+                for x in r.rows if x.posttax_requested > 0.005],
         }
     return {"current": sc(a.current), "recommended": sc(a.recommended), "warnings": a.warnings}

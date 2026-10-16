@@ -1,7 +1,7 @@
 {
   "year": 2026,
   "source": "Tax Foundation, State Individual Income Tax Rates and Brackets, 2026 (as of Jan 1, 2026)",
-  "notes": "brackets: [threshold, rate] pairs, rate applies above threshold. 'all' = same brackets for single and mfj. std/exempt: [single, couple]. exempt_type: deduction or credit. taxes_401k_deferrals: state includes pretax 401(k) deferrals in state wages.",
+  "notes": "brackets: [threshold, rate] pairs, rate applies above threshold. 'all' = same brackets for single and mfj. std/exempt: [single, couple]. exempt_type: deduction or credit. taxes_401k_deferrals: state includes pretax 401(k) deferrals in state wages. taxes_hsa: state does not exclude HSA payroll contributions (only CA and NJ; all other states are assumed to conform to the federal exclusion).",
   "states": {
     "AK": {"name": "Alaska", "type": "none"},
     "FL": {"name": "Florida", "type": "none"},
@@ -31,7 +31,7 @@
 
     "AL": {"name": "Alabama", "type": "income", "brackets": {"single": [[0, 0.02], [500, 0.04], [3000, 0.05]], "mfj": [[0, 0.02], [1000, 0.04], [6000, 0.05]]}, "std": [3000, 8500], "exempt": [1500, 3000], "exempt_type": "deduction"},
     "AR": {"name": "Arkansas", "type": "income", "brackets": {"all": [[0, 0.02], [4600, 0.039]]}, "std": [2470, 4940], "exempt": [29, 58], "exempt_type": "credit"},
-    "CA": {"name": "California", "type": "income", "brackets": {
+    "CA": {"name": "California", "type": "income", "taxes_hsa": true, "brackets": {
       "single": [[0, 0.01], [11079, 0.02], [26264, 0.04], [41452, 0.06], [57542, 0.08], [72724, 0.093], [371479, 0.103], [445771, 0.113], [742953, 0.123], [1000000, 0.133]],
       "mfj": [[0, 0.01], [22158, 0.02], [52528, 0.04], [82904, 0.06], [115084, 0.08], [145448, 0.093], [742958, 0.103], [891542, 0.113], [1000000, 0.123], [1485906, 0.133]]},
       "std": [5540, 11080], "exempt": [153, 306], "exempt_type": "credit"},
@@ -59,7 +59,7 @@
     "MO": {"name": "Missouri", "type": "income", "brackets": {"all": [[0, 0.0], [1348, 0.02], [2696, 0.025], [4044, 0.03], [5392, 0.035], [6740, 0.04], [8088, 0.045], [9436, 0.047]]}, "std": [16100, 32200]},
     "MT": {"name": "Montana", "type": "income", "brackets": {"single": [[0, 0.047], [47500, 0.0565]], "mfj": [[0, 0.047], [95000, 0.0565]]}, "std": [16100, 32200]},
     "NE": {"name": "Nebraska", "type": "income", "brackets": {"single": [[0, 0.0246], [4130, 0.0351], [24760, 0.0455]], "mfj": [[0, 0.0246], [8250, 0.0351], [49530, 0.0455]]}, "std": [8850, 17700], "exempt": [176, 352], "exempt_type": "credit"},
-    "NJ": {"name": "New Jersey", "type": "income", "brackets": {
+    "NJ": {"name": "New Jersey", "type": "income", "taxes_hsa": true, "brackets": {
       "single": [[0, 0.014], [20000, 0.0175], [35000, 0.035], [40000, 0.0553], [75000, 0.0637], [500000, 0.0897], [1000000, 0.1075]],
       "mfj": [[0, 0.014], [20000, 0.0175], [50000, 0.0245], [70000, 0.035], [80000, 0.0553], [150000, 0.0637], [500000, 0.0897], [1000000, 0.1075]]},
       "exempt": [1000, 2000], "exempt_type": "deduction", "taxes_401k_deferrals": true},

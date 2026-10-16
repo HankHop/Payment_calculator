@@ -26,6 +26,7 @@ class Bonus:
     pay_date: date
     amount: Optional[float]               # fixed dollars, or None
     percent_of_salary: Optional[float]    # % of base salary in effect on pay_date, or None
+    separate_paycheck: bool = False       # False: paid with the regular paycheck when dates match
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,15 @@ class Recommendation:
 
 
 @dataclass(frozen=True)
+class Deductions:
+    """Per-regular-paycheck payroll deductions (none are taken from the bonus paycheck)."""
+    hsa_per_paycheck: float
+    hsa_coverage: Optional[str]           # "self", "family" or None (skips the HSA limit check)
+    other_pretax_per_paycheck: float      # Section 125 premiums: medical, dental, vision, FSA
+    other_posttax_per_paycheck: float     # life insurance, dues, ESPP, etc.
+
+
+@dataclass(frozen=True)
 class Config:
     tax_year: int
     filing_status: str
@@ -79,6 +89,7 @@ class Config:
     bonus: Optional[Bonus]
     contributions: Contributions
     recommendation: Recommendation
+    deductions: Deductions
 
 
 def _date(value, field) -> date:
@@ -148,7 +159,8 @@ def parse(raw: dict) -> Config:
         if (amount is None) == (pct is None):
             raise ConfigError("pay.bonus: give exactly one of amount or percent_of_salary")
         bonus = Bonus(d, float(amount) if amount is not None else None,
-                      _pct(pct, "pay.bonus.percent_of_salary", 0, 1000) if pct is not None else None)
+                      _pct(pct, "pay.bonus.percent_of_salary", 0, 1000) if pct is not None else None,
+                      bool(b.get("separate_paycheck", False)))
 
     c = raw.get("contributions") or {}
     e = c.get("employer") or {}
@@ -207,8 +219,18 @@ def parse(raw: dict) -> Config:
         plan_max_percent=_pct(rec.get("plan_max_percent", 100), "recommendation.plan_max_percent", 0, 100),
     )
 
+    d = raw.get("deductions") or {}
+    coverage = d.get("hsa_coverage")
+    if coverage not in (None, "self", "family"):
+        raise ConfigError("deductions.hsa_coverage: 'self', 'family' or null")
+    deductions = Deductions(
+        _pct(d.get("hsa_per_paycheck", 0), "deductions.hsa_per_paycheck", 0, 1e7),
+        coverage,
+        _pct(d.get("other_pretax_per_paycheck", 0), "deductions.other_pretax_per_paycheck", 0, 1e7),
+        _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7))
+
     return Config(year, status, state, age, as_of, float(salary), freq, first_pay, raise_, bonus,
-                  contributions, recommendation)
+                  contributions, recommendation, deductions)
 
 
 def load(path) -> Config:

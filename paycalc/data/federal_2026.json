@@ -19,6 +19,7 @@
     "addl_medicare_rate": 0.009,
     "addl_medicare_threshold": {"single": 200000, "mfj": 250000, "mfs": 125000, "hoh": 200000}
   },
+  "hsa": {"self_only": 4400, "family": 8750, "catch_up_55": 1000},
   "retirement": {
     "elective_deferral_limit": 24500,
     "catch_up_50_plus": 8000,

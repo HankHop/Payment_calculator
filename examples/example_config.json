@@ -3,22 +3,34 @@
   "filing_status": "single",
   "state": "IL",
   "age_end_of_year": 33,
-  "as_of_date": "2026-10-16",
-
+  "as_of_date": null,
   "pay": {
     "base_salary": 150000,
     "frequency": "biweekly",
     "first_pay_date": "2026-01-09",
-    "raise": {"effective_date": "2026-07-01", "percent": 5},
-    "bonus": {"pay_date": "2026-03-13", "percent_of_salary": 10}
+    "raise": {
+      "effective_date": "2026-07-01",
+      "percent": 5
+    },
+    "bonus": {
+      "pay_date": "2026-03-20",
+      "percent_of_salary": 10
+    }
   },
-
   "contributions": {
     "posttax_type": "after_tax",
-    "acknowledge_mega_backdoor": false,
+    "acknowledge_mega_backdoor": true,
     "elections": [
-      {"effective_date": "2026-01-09", "pretax_percent": 20, "posttax_percent": 0},
-      {"effective_date": "2026-08-07", "pretax_percent": 20, "posttax_percent": 80}
+      {
+        "effective_date": "2026-01-09",
+        "pretax_percent": 20,
+        "posttax_percent": 0
+      },
+      {
+        "effective_date": "2026-08-07",
+        "pretax_percent": 20,
+        "posttax_percent": 80
+      }
     ],
     "bonus_eligible_for_employee_contributions": false,
     "employer": {
@@ -29,12 +41,17 @@
       "bonus_eligible_for_nonelective": false
     }
   },
-
   "recommendation": {
     "target_employee_contribution": "max",
     "target_total_additions": "max",
     "expected_retirement_marginal_rate_percent": 22,
     "percent_step": 1,
     "plan_max_percent": 100
+  },
+  "deductions": {
+    "hsa_per_paycheck": 150,
+    "hsa_coverage": "family",
+    "other_pretax_per_paycheck": 200,
+    "other_posttax_per_paycheck": 25
   }
 }

@@ -15,7 +15,7 @@ After-tax mode (non-Roth post-tax contributions)
   These count toward the 415(c) total additions limit, not the elective limit.
   percent = (415(c) limit - everything already contributed or projected: pretax, employer,
   prior after-tax) / remaining eligible pay, rounded down, then capped by what take-home pay
-  can cover after pretax contributions and estimated taxes.
+  can cover after estimated taxes, HSA, premiums and pretax contributions.
 """
 from __future__ import annotations
 
@@ -51,14 +51,16 @@ def _round_to(value: float, step: float) -> float:
     return round(round(value / step) * step, 6)
 
 
-def _pretax_dollars(total_dollars: float, gross: float, cfg: Config, fed: dict, st: dict) -> float:
+def _pretax_dollars(total_dollars: float, gross: float, cfg: Config, fed: dict, st: dict,
+                    hsa: float = 0.0, other_pretax: float = 0.0) -> float:
     """Largest pretax amount (<= total_dollars) whose last dollar still saves more than the
     expected retirement marginal rate."""
     r = cfg.recommendation.expected_retirement_marginal_rate_percent / 100
+    sec125, state_excl = taxes.exclusions(hsa, other_pretax, st)
 
     def worthwhile(p: float) -> bool:
-        rate = (taxes.federal_marginal(gross, p, cfg.filing_status, fed)
-                + taxes.state_marginal(gross, p, cfg.filing_status, st))
+        rate = (taxes.federal_marginal(gross - sec125, p, cfg.filing_status, fed)
+                + taxes.state_marginal(gross, p, cfg.filing_status, st, state_excl))
         return rate > r
 
     whole = int(math.floor(total_dollars))
@@ -135,12 +137,15 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
         warnings.append(f"Plan maximum of {elective_pct:g}% is below the {exact:.2f}% needed to reach the target.")
     elective_dollars = elective_pct / 100 * rem_comp
     gross = sum(e.gross for e in events)
+    hsa_total = sum(e.hsa for e in events)
+    other_pretax_total = sum(e.other_pretax for e in events)
 
     if after_tax:
         pre_pct, roth_pct = elective_pct, 0.0
         pre_target = ytd_pre + elective_dollars
     else:
-        pre_target = _pretax_dollars(ytd_elective + elective_dollars, gross, cfg, fed, st)
+        pre_target = _pretax_dollars(ytd_elective + elective_dollars, gross, cfg, fed, st,
+                                     hsa_total, other_pretax_total)
         rem_pre = min(max(0.0, pre_target - ytd_pre), elective_dollars)
         pre_pct = min(_round_to(rem_pre / rem_comp * 100, step), elective_pct)
         roth_pct = round(elective_pct - pre_pct, 6)
@@ -157,21 +162,24 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
             # Taxes depend only on gross and pretax, so the rate can be found first and then
             # applied to the already-paid after-tax contributions as well.
             sim0 = simulate(events, plan_with(pre_pct, 0.0))
-            tax = taxes.summarize(sim0.gross, sim0.pretax, cfg.filing_status, fed, st)
+            tax = taxes.summarize(sim0.gross, sim0.pretax, cfg.filing_status, fed, st,
+                                  hsa_total, other_pretax_total)
             rate = tax.total / sim0.gross if sim0.gross else 0.0
             sim1 = simulate(events, plan_with(pre_pct, 0.0, rate))
             need_post = max(0.0, total_target - sim1.total_additions)
             wanted_pct = _floor_to(need_post / rem_comp * 100, step)
-            # What take-home pay can cover, per remaining paycheck
+            # What take-home pay can cover, per remaining paycheck, after taxes, HSA, premiums
+            # and other post-tax deductions
             feasible = min(
-                ((ev.gross * (1 - rate) - pre_pct / 100 * ev.deferral_comp) / ev.deferral_comp * 100
+                ((ev.gross * (1 - rate) - ev.hsa - ev.other_pretax - ev.other_posttax
+                  - pre_pct / 100 * ev.deferral_comp) / ev.deferral_comp * 100
                  for ev in remaining if ev.deferral_comp > 0), default=0.0)
             feasible = _floor_to(max(0.0, feasible), step)
             post_pct = min(wanted_pct, feasible, rc.plan_max_percent, 100 - pre_pct)
             if post_pct < wanted_pct - 1e-9:
                 warnings.append(
                     f"Reaching the target needs {wanted_pct:g}% after-tax, but take-home pay after "
-                    f"pretax contributions and estimated taxes covers about {feasible:g}% "
+                    f"HSA, premiums, pretax contributions and estimated taxes covers about {feasible:g}% "
                     f"(plan max {rc.plan_max_percent:g}%). Using {post_pct:g}%.")
         else:
             post_pct = 0.0

@@ -22,7 +22,10 @@ python -m unittest discover -s tests            # tests
 | `age_end_of_year` | Optional. 50+ adds the catch-up limit, 60-63 the super catch-up |
 | `pay.base_salary`, `frequency`, `first_pay_date` | `weekly`, `biweekly`, `semimonthly` (15th and month end), `monthly` (month end). `first_pay_date` is any real pay date, required for weekly/biweekly; 27-paycheck years are handled |
 | `pay.raise` | `effective_date` plus `new_salary` or `percent`. Applies to pay dates on or after the effective date |
-| `pay.bonus` | `pay_date` plus `amount` or `percent_of_salary` (of the salary in effect that day). Modeled as its own paycheck |
+| `pay.bonus` | `pay_date` plus `amount` or `percent_of_salary` (of the salary in effect that day). If the date is a regular payday the bonus is added to that paycheck (so one paycheck's take-home covers everything taken from it); otherwise, or with `"separate_paycheck": true`, it is an off-cycle paycheck |
+| `deductions.hsa_per_paycheck`, `hsa_coverage` | Payroll HSA per regular paycheck; `hsa_coverage` (`self`/`family`) enables the annual limit check (55+ catch-up via `age_end_of_year`) |
+| `deductions.other_pretax_per_paycheck` | Medical/dental/vision premiums, FSA (Section 125): reduce income tax and FICA |
+| `deductions.other_posttax_per_paycheck` | Anything else taken after tax (life insurance, dues, ESPP) |
 | `contributions.elections` | List of `{effective_date, pretax_percent, posttax_percent}`. Each applies to pay dates on or after its date, so a mid-year change is two entries. A single `pretax_percent`/`posttax_percent` pair (no list) applies all year |
 | `contributions.posttax_type` | `after_tax` = non-Roth after-tax money (counts toward the 415(c) total limit, not the 24,500 deferral limit; mega-backdoor style). `roth` (default) = Roth 401(k), shares the deferral limit with pretax |
 | `contributions.acknowledge_mega_backdoor` | Default `false`. While `posttax_type` is `after_tax` and this is false, all after-tax figures are hidden and after-tax elections are ignored. Set to `true` only if your plan allows an in-plan Roth conversion or in-service rollover to a Roth IRA |
@@ -50,8 +53,14 @@ After-tax money (`posttax_type: after_tax`)
 1. Room = 415(c) limit minus everything already contributed or projected: pretax, employer match
    and unmatched, and after-tax already paid.
 2. Percent = room / remaining eligible pay, rounded down, then capped at what take-home pay can
-   cover after pretax contributions and estimated taxes. If the cap binds, the tool says how far
+   cover after estimated taxes, HSA, premiums, other deductions and pretax 401(k). If the cap binds, the tool says how far
    short the year ends up. Elections that add to 100% of gross can never be fully deducted.
+
+Real-life payroll order: taxes, HSA, premiums and the pretax 401(k) come out first and the
+post-tax election takes what it asks for, limited by what is left. An election near 100% therefore
+deducts "whatever remains" on a normal paycheck, and the full election on a paycheck with a bonus.
+The output has a table per paycheck (elected, available, deducted, left over, and why) so a bonus
+month where the whole election went through, with pay left over, is visible at a glance.
 
 Planning from the start of the year: omit `as_of_date` (or set it before your first paycheck) and
 the recommendation covers every paycheck. Set it to a later date and earlier paychecks are treated
@@ -76,7 +85,10 @@ as already done.
 - Employer match is computed per paycheck with no annual true-up, and only on pretax/Roth
   deferrals (not on after-tax money). If you hit the deferral limit early, match stops.
 - The 415(c) limit is treated as a hard stop for pretax, employer and after-tax money together.
-- Take-home cap uses the year's average tax rate; actual withholding differs paycheck to paycheck.
+- Take-home cap uses the year's average tax rate; actual withholding differs paycheck to paycheck
+  (bonuses are withheld at a flat supplemental rate, for example), so "available" is an estimate.
+- HSA: CA and NJ do not exclude HSA contributions from state tax; every other state is assumed to
+  follow the federal exclusion. Employer HSA contributions are not modeled.
 - Earnings and the tax on converting after-tax money to Roth are not modeled.
 - 2026 rule requiring catch-up contributions to be Roth for higher earners.
 - Tax is a liability estimate, not paycheck withholding.

@@ -12,11 +12,15 @@ from .config import FREQUENCIES, Config
 @dataclass(frozen=True)
 class PayEvent:
     pay_date: date
-    kind: str                 # "regular" or "bonus"
+    kind: str                 # "regular", "regular+bonus" (bonus on a regular payday) or "bonus" (off-cycle)
     gross: float
     deferral_comp: float      # pay the employee percentage applies to
     match_comp: float         # pay the employer match is calculated on
     nonelective_comp: float   # pay the unmatched employer contribution is calculated on
+    hsa: float = 0.0
+    other_pretax: float = 0.0
+    other_posttax: float = 0.0
+    bonus_amount: float = 0.0     # part of gross that is bonus
 
 
 def pay_dates(year: int, frequency: str, first_pay_date: date | None) -> List[date]:
@@ -49,21 +53,37 @@ def salary_on(cfg: Config, d: date) -> float:
 
 
 def build_events(cfg: Config) -> List[PayEvent]:
-    """Regular paychecks (salary / nominal periods) plus the bonus as its own event."""
+    """Regular paychecks (salary / nominal periods). A bonus paid on a regular payday is added to
+    that paycheck, so one paycheck's take-home covers everything deducted from it; otherwise it
+    is an off-cycle paycheck (also when pay.bonus.separate_paycheck is true)."""
     periods = FREQUENCIES[cfg.frequency]
-    emp = cfg.contributions.employer
-    events = []
-    for d in pay_dates(cfg.tax_year, cfg.frequency, cfg.first_pay_date):
-        gross = salary_on(cfg, d) / periods
-        events.append(PayEvent(d, "regular", gross, gross, gross, gross))
+    emp, dd, ct = cfg.contributions.employer, cfg.deductions, cfg.contributions
+    bonus_gross = 0.0
     if cfg.bonus:
         b = cfg.bonus
-        gross = b.amount if b.amount is not None else salary_on(cfg, b.pay_date) * b.percent_of_salary / 100
+        bonus_gross = (b.amount if b.amount is not None
+                       else salary_on(cfg, b.pay_date) * b.percent_of_salary / 100)
+    dates = pay_dates(cfg.tax_year, cfg.frequency, cfg.first_pay_date)
+    merge = bool(cfg.bonus and not cfg.bonus.separate_paycheck and cfg.bonus.pay_date in dates)
+
+    def eligible(flag: bool, amount: float) -> float:
+        return amount if flag else 0.0
+
+    events = []
+    for d in dates:
+        base = salary_on(cfg, d) / periods
+        extra = bonus_gross if merge and d == cfg.bonus.pay_date else 0.0
         events.append(PayEvent(
-            b.pay_date, "bonus", gross,
-            gross if cfg.contributions.bonus_eligible_for_employee_contributions else 0.0,
-            gross if emp.bonus_eligible_for_match else 0.0,
-            gross if emp.bonus_eligible_for_nonelective else 0.0,
-        ))
-    events.sort(key=lambda e: (e.pay_date, e.kind != "regular"))
+            d, "regular+bonus" if extra else "regular", base + extra,
+            base + eligible(ct.bonus_eligible_for_employee_contributions, extra),
+            base + eligible(emp.bonus_eligible_for_match, extra),
+            base + eligible(emp.bonus_eligible_for_nonelective, extra),
+            dd.hsa_per_paycheck, dd.other_pretax_per_paycheck, dd.other_posttax_per_paycheck, extra))
+    if cfg.bonus and not merge:
+        events.append(PayEvent(
+            cfg.bonus.pay_date, "bonus", bonus_gross,
+            eligible(ct.bonus_eligible_for_employee_contributions, bonus_gross),
+            eligible(emp.bonus_eligible_for_match, bonus_gross),
+            eligible(emp.bonus_eligible_for_nonelective, bonus_gross), 0.0, 0.0, 0.0, bonus_gross))
+    events.sort(key=lambda e: (e.pay_date, e.kind == "bonus"))
     return events

@@ -5,8 +5,9 @@ Limits modeled
 - Section 415(c) total additions (employee pretax + post-tax + employer): IRS limit + catch-up.
   The 415(c) cap is enforced on post-tax contributions when posttax_type == "after_tax".
 - 401(a)(17) compensation limit on pay the percentages apply to.
-- Optional take-home cap: post-tax contributions cannot exceed pay left after pretax
-  contributions and estimated taxes (take_home_rate = all-in tax / gross).
+- Optional take-home cap: post-tax contributions cannot exceed pay left after estimated taxes,
+  HSA, premiums, other post-tax deductions and pretax 401(k) (take_home_rate = all-in tax / gross).
+  An election of 100% therefore contributes whatever is left, as payroll does.
 """
 from __future__ import annotations
 
@@ -57,6 +58,11 @@ class EventRow:
     posttax: float
     match: float
     nonelective: float
+    hsa: float = 0.0
+    other_pretax: float = 0.0
+    other_posttax: float = 0.0
+    posttax_requested: float = 0.0              # what the election asks for on this paycheck
+    posttax_available: Optional[float] = None   # pay left for it after taxes and deductions
 
 
 @dataclass
@@ -79,6 +85,12 @@ class YearResult:
     def match(self): return self._sum("match")
     @property
     def nonelective(self): return self._sum("nonelective")
+    @property
+    def hsa(self): return self._sum("hsa")
+    @property
+    def other_pretax(self): return self._sum("other_pretax")
+    @property
+    def other_posttax(self): return self._sum("other_posttax")
     @property
     def employee(self): return self.pretax + self.posttax
     @property
@@ -134,8 +146,10 @@ def eligible_deferral_comp(events: Sequence[PayEvent], comp_limit: float) -> flo
 
 
 def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
-    """Per-paycheck contributions. Match is calculated per paycheck (no annual true-up) and,
-    for after-tax mode, only on pretax deferrals."""
+    """Per-paycheck contributions, in the order payroll applies them: taxes, HSA and premiums come
+    out first, then the 401(k) elections take what they ask for, limited by what is left.
+    Match is calculated per paycheck (no annual true-up) and, for after-tax mode, only on
+    pretax deferrals."""
     after_tax = plan.posttax_type == "after_tax"
     result = YearResult(posttax_type=plan.posttax_type)
     cum_def_comp = cum_match_comp = cum_ne_comp = 0.0
@@ -159,21 +173,26 @@ def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
             scale = room / (pre + post) if pre + post else 0.0
             pre, post = pre * scale, post * scale
 
+        # Take-home cap: post-tax money can only come from pay left after estimated taxes,
+        # HSA, premiums, other post-tax deductions and the pretax 401(k).
+        requested, available = post, None
+        if plan.take_home_rate is not None:
+            available = max(0.0, ev.gross * (1 - plan.take_home_rate)
+                            - ev.hsa - ev.other_pretax - ev.other_posttax - pre)
+            post = min(post, available)
+
         deferral = pre if after_tax else pre + post
         share = (match_comp / def_comp) if def_comp > 0 else 0.0
         matchable = min(deferral * min(share, 1.0), plan.match_cap_percent / 100 * match_comp)
         match = plan.match_rate * matchable
         nonelective = plan.nonelective_percent / 100 * ne_comp
 
-        # 415(c) is a hard stop: pretax, then employer, then after-tax fit in what room is left.
+        # 415(c) is a hard stop: pretax, employer, then post-tax fit in what room is left.
         total_room = max(0.0, plan.total_cap - cum_total)
         pre = min(pre, total_room)
         match = min(match, max(0.0, total_room - pre))
         nonelective = min(nonelective, max(0.0, total_room - pre - match))
-        if after_tax:
-            if plan.take_home_rate is not None:
-                post = min(post, max(0.0, ev.gross * (1 - plan.take_home_rate) - pre))
-            post = min(post, max(0.0, total_room - pre - match - nonelective))
+        post = min(post, max(0.0, total_room - pre - match - nonelective))
 
         cum_elective += pre + (0.0 if after_tax else post)
         cum_total += pre + post + match + nonelective
@@ -182,5 +201,6 @@ def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
         if result.total_cap_reached_on is None and cum_total >= plan.total_cap - 0.005:
             result.total_cap_reached_on = ev.pay_date
 
-        result.rows.append(EventRow(ev.pay_date, ev.kind, ev.gross, pre, post, match, nonelective))
+        result.rows.append(EventRow(ev.pay_date, ev.kind, ev.gross, pre, post, match, nonelective,
+                                    ev.hsa, ev.other_pretax, ev.other_posttax, requested, available))
     return result
