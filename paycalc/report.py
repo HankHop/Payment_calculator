@@ -55,31 +55,40 @@ def _rows(a: Analysis):
     ]
 
 
-def _election_lines(sc: Scenario, label: str) -> List[str]:
+def election_table(sc: Scenario) -> list:
     """Per paycheck: what the post-tax election asks for, what pay is left to cover it after
-    taxes, HSA, premiums and pretax 401(k), what was deducted, and what stays in take-home."""
-    rows = [r for r in sc.result.rows if r.posttax_requested > 0.005]
+    taxes, HSA, premiums and pretax 401(k), what was deducted, what stays in take-home, and why."""
+    out = []
+    for r in sc.result.rows:
+        if r.posttax_requested <= 0.005:
+            continue
+        avail = r.posttax_available or 0.0
+        short = _m(r.posttax_requested - r.posttax)
+        if r.posttax >= r.posttax_requested - 0.005:
+            status, note = "full", "full election met"
+        elif r.posttax < min(r.posttax_requested, avail) - 0.005:
+            status, note = "limit", f"limited by the 415(c) total limit, {short} of the election not deducted"
+        else:
+            status, note = "takehome", f"limited by take-home, {short} of the election not deducted"
+        if "bonus" in r.kind:
+            note += f"; includes {r.label or 'bonus'}"
+        out.append(dict(date=str(r.pay_date), kind=r.kind, elected=r.posttax_requested, available=avail,
+                        deducted=r.posttax, left_over=max(0.0, avail - r.posttax), status=status, note=note))
+    return out
+
+
+def _election_lines(sc: Scenario, label: str) -> List[str]:
+    rows = election_table(sc)
     if not rows:
         return []
     out = ["", f"POST-TAX ELECTION VS. AVAILABLE PAY - {label}",
            f"  {'date':<12}{'elected':>11}{'available':>12}{'deducted':>11}{'left over':>11}  note"]
     for r in rows:
-        avail = r.posttax_available or 0.0
-        if r.posttax >= r.posttax_requested - 0.005:
-            note = "full election met"
-        elif r.posttax < min(r.posttax_requested, avail) - 0.005:
-            note = (f"limited by the 415(c) total limit, "
-                    f"{_m(r.posttax_requested - r.posttax)} of the election not deducted")
-        else:
-            note = f"limited by take-home, {_m(r.posttax_requested - r.posttax)} of the election not deducted"
-        if "bonus" in r.kind:
-            note += f"; includes {r.label or 'bonus'}"
-        out.append(f"  {str(r.pay_date):<12}{r.posttax_requested:>11,.2f}{avail:>12,.2f}"
-                   f"{r.posttax:>11,.2f}{max(0.0, avail - r.posttax):>11,.2f}  {note}")
-    out.append(f"  {'total':<12}{sum(r.posttax_requested for r in rows):>11,.2f}"
-               f"{sum(r.posttax_available or 0.0 for r in rows):>12,.2f}"
-               f"{sum(r.posttax for r in rows):>11,.2f}"
-               f"{sum(max(0.0, (r.posttax_available or 0.0) - r.posttax) for r in rows):>11,.2f}")
+        out.append(f"  {r['date']:<12}{r['elected']:>11,.2f}{r['available']:>12,.2f}"
+                   f"{r['deducted']:>11,.2f}{r['left_over']:>11,.2f}  {r['note']}")
+    out.append(f"  {'total':<12}{sum(r['elected'] for r in rows):>11,.2f}"
+               f"{sum(r['available'] for r in rows):>12,.2f}{sum(r['deducted'] for r in rows):>11,.2f}"
+               f"{sum(r['left_over'] for r in rows):>11,.2f}")
     return out
 
 
@@ -205,6 +214,9 @@ def text(a: Analysis, schedule: bool = False) -> str:
 
 
 def as_dict(a: Analysis) -> dict:
+    cfg = a.cfg
+    show_post = cfg.contributions.after_tax_enabled
+
     def sc(s: Scenario):
         r, t = s.result, s.tax
         return {
@@ -218,11 +230,46 @@ def as_dict(a: Analysis) -> dict:
             "total_taxes": round(t.total, 2), "net_pay": round(s.net_pay, 2),
             "limit_reached_on": str(r.limit_reached_on) if r.limit_reached_on else None,
             "monthly": [{k: (round(v, 2) if k != "month" else v) for k, v in m.items()}
-                        for m in monthly(s, a.cfg.monthly_expenses)],
+                        for m in monthly(s, cfg.monthly_expenses)],
             "posttax_by_paycheck": [
-                {"date": str(x.pay_date), "kind": x.kind, "elected": round(x.posttax_requested, 2),
-                 "available": round(x.posttax_available or 0.0, 2), "deducted": round(x.posttax, 2),
-                 "left_over": round(max(0.0, (x.posttax_available or 0.0) - x.posttax), 2)}
-                for x in r.rows if x.posttax_requested > 0.005],
+                {k: (round(v, 2) if isinstance(v, float) else v) for k, v in row.items()}
+                for row in election_table(s)] if show_post else [],
+            "paychecks": [
+                {"date": str(x.pay_date), "kind": x.kind, "label": x.label, "gross": round(x.gross, 2),
+                 "pretax": round(x.pretax, 2), "posttax": round(x.posttax, 2),
+                 "match": round(x.match, 2), "unmatched": round(x.nonelective, 2),
+                 "hsa": round(x.hsa, 2), "other_pretax": round(x.other_pretax, 2),
+                 "other_posttax": round(x.other_posttax, 2)}
+                for x in r.rows],
         }
-    return {"current": sc(a.current), "recommended": sc(a.recommended), "warnings": a.warnings}
+
+    rec = a.recommendation
+    return {
+        "meta": {
+            "tax_year": cfg.tax_year, "state": a.state_name, "filing_status": cfg.filing_status,
+            "paychecks": sum(1 for e in a.events if e.kind != "bonus"),
+            "after_tax_enabled": show_post, "posttax_type": cfg.contributions.posttax_type,
+            "as_of_date": str(cfg.as_of_date) if cfg.as_of_date else None,
+            "monthly_expenses": cfg.monthly_expenses,
+            "raise": ({"effective_date": str(cfg.raise_.effective_date), "new_salary": round(cfg.raise_.new_salary, 2)}
+                      if cfg.raise_ else None),
+            "bonuses": [{"name": b.name, "date": str(b.pay_date), "gross": round(b.gross, 2),
+                         "employee": b.employee, "match": b.match, "unmatched": b.nonelective,
+                         "with_regular": b.with_regular} for b in resolved_bonuses(cfg)],
+            "elections": [{"effective_date": str(e.effective_date), "pretax": e.pretax_percent,
+                           "posttax": e.posttax_percent if show_post else None}
+                          for e in cfg.contributions.elections],
+        },
+        "summary": [{"label": l, "current": c, "recommended": r, "section": not c and not r}
+                    for l, c, r in _rows(a)],
+        "current": sc(a.current),
+        "recommended": sc(a.recommended),
+        "recommendation": {
+            "pretax_percent": rec.pretax_percent,
+            "posttax_percent": rec.posttax_percent if show_post else None,
+            "effective_from": str(rec.effective_from) if rec.effective_from else None,
+            "elective_target": round(rec.target_dollars, 2),
+            "elective_limit_reached_on": str(rec.result.limit_reached_on) if rec.result.limit_reached_on else None,
+        },
+        "warnings": a.warnings,
+    }

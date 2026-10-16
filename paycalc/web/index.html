@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paycheck Calculator</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2430; --muted: #5d6b7b; --line: #dfe3e8;
+  --accent: #1f5fbf; --accent-ink: #ffffff; --ok: #1d7a46; --ok-bg: #e5f4ea;
+  --warn: #8a5a00; --warn-bg: #fff2d6; --bad: #a52a2a; --bad-bg: #fde8e8; --zero: #a52a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161c; --panel: #1a2029; --ink: #e6ebf1; --muted: #9aa8b8; --line: #2c3541;
+    --accent: #6aa3f2; --accent-ink: #0d1520; --ok: #6fd39a; --ok-bg: #173424;
+    --warn: #f1c366; --warn-bg: #3a2d10; --bad: #f19a9a; --bad-bg: #3b1d1d; --zero: #f19a9a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+h1 { font-size: 17px; margin: 0; }
+.status { color: var(--muted); font-size: 13px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.link { border: none; background: none; color: var(--accent); padding: 2px 4px; }
+button.danger { color: var(--bad); }
+.layout { display: grid; grid-template-columns: minmax(320px, 430px) 1fr; gap: 16px; padding: 16px; align-items: start; }
+@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+label { display: block; font-size: 12px; color: var(--muted); }
+label > input, label > select { display: block; width: 100%; margin-top: 2px; }
+input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 7px; min-width: 0; }
+input:disabled { opacity: .5; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--ink); margin: 6px 0; }
+label.check > input { display: inline-block; width: auto; margin: 3px 0 0; flex: none; }
+label.check { color: var(--ink); }
+.hint { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+.item { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0; }
+.item .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: 600; }
+.notice { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 13px; }
+.error { background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.banner { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 8px 12px; margin: 12px 16px 0; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font-size: 20px; font-weight: 650; margin-top: 2px; }
+.stat .s { font-size: 12px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+.seg button { border: none; border-radius: 0; background: var(--panel); }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+tr.section td { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: 10px; border-bottom: none; }
+tr.total td { font-weight: 650; border-top: 2px solid var(--line); }
+td.note { text-align: left; white-space: normal; min-width: 220px; }
+td.zero { color: var(--zero); font-weight: 600; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.pill.full { background: var(--ok-bg); color: var(--ok); }
+.pill.takehome, .pill.limit { background: var(--warn-bg); color: var(--warn); }
+.warnlist { margin: 0; padding-left: 18px; }
+.warnlist li { margin: 3px 0; }
+.dim { opacity: .55; }
+details > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
+.foot { color: var(--muted); font-size: 12px; margin-top: 6px; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+  padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+#toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Paycheck Calculator</h1>
+  <div class="status" id="status">Loading…</div>
+  <div>
+    <button id="reset" title="Replace the form with the example numbers">Reset to example</button>
+    <button id="save" class="primary">Save inputs</button>
+  </div>
+</header>
+<div id="banner" class="banner" hidden></div>
+<div class="layout">
+  <div id="form"></div>
+  <div id="results"></div>
+</div>
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+let S = {};            // the form state: same shape as config.json
+let META = {states: []};
+let VIEW = "recommended";
+let SEQ = 0, TIMER = null, LAST = null, EXAMPLE = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = (n, d = 2) => (n < 0 ? "-" : "") + "$" + Math.abs(n).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (n) => (n == null ? "" : (+n).toString() + "%");
+
+// ---- state helpers --------------------------------------------------------
+function getPath(o, p) { return p.split(".").reduce((a, k) => (a == null ? undefined : a[k]), o); }
+function setPath(o, p, v) {
+  const keys = p.split("."); let cur = o;
+  keys.slice(0, -1).forEach((k, i) => {
+    if (cur[k] == null) cur[k] = /^\d+$/.test(keys[i + 1]) ? [] : {};
+    cur = cur[k];
+  });
+  const last = keys[keys.length - 1];
+  if (v === undefined) { delete cur[last]; } else { cur[last] = v; }
+}
+function ensure() {
+  S.pay = S.pay || {}; S.pay.bonuses = S.pay.bonuses || [];
+  if (S.pay.bonus) { S.pay.bonuses.unshift(S.pay.bonus); delete S.pay.bonus; }
+  S.contributions = S.contributions || {};
+  S.contributions.elections = S.contributions.elections || [];
+  S.contributions.employer = S.contributions.employer || {};
+  S.deductions = S.deductions || {};
+  S.recommendation = S.recommendation || {};
+}
+function clean(v) {
+  if (Array.isArray(v)) return v.map(clean);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) {
+      const c = clean(x);
+      if (c === null || c === undefined || c === "") continue;
+      if (typeof c === "number" && Number.isNaN(c)) continue;
+      o[k] = c;
+    }
+    return o;
+  }
+  return v;
+}
+
+// ---- form pieces ----------------------------------------------------------
+function val(p) { const v = getPath(S, p); return v == null ? "" : v; }
+function num(p, label, hint = "", extra = "") {
+  return `<label>${label}<input type="number" step="any" data-p="${p}" data-t="num" value="${esc(val(p))}" ${extra}></label>${hint ? `<div class="hint">${hint}</div>` : ""}`;
+}
+function txt(p, label, type = "text", t = "str", hint = "") {
+  return `<label>${label}<input type="${type}" data-p="${p}" data-t="${t}" value="${esc(val(p))}"></label>${hint ? `<div class="hint">${hint}</div>` : ""}`;
+}
+function sel(p, label, opts, t = "str", rerender = false) {
+  const cur = String(val(p));
+  const o = opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
+  return `<label>${label}<select data-p="${p}" data-t="${t}" ${rerender ? "data-re=1" : ""}>${o}</select></label>`;
+}
+function tri(p, label) {
+  return sel(p, label, [["", "Use my default"], ["true", "Yes"], ["false", "No"]], "tri");
+}
+function chk(p, label, rerender = false) {
+  return `<label class="check"><input type="checkbox" data-p="${p}" data-t="bool" ${rerender ? "data-re=1" : ""} ${getPath(S, p) ? "checked" : ""}><span>${label}</span></label>`;
+}
+
+function renderForm() {
+  ensure();
+  const c = S.contributions, afterTax = c.posttax_type === "after_tax", ack = !!c.acknowledge_mega_backdoor;
+  const postOn = !afterTax || ack;
+  const states = META.states.map((s) => [s.code, s.name]);
+  const r = S.pay.raise, hasRaise = !!r;
+  const raiseMode = r && r.new_salary != null && r.percent == null ? "new_salary" : "percent";
+  const freq = S.pay.frequency;
+
+  let h = `<div class="card"><h2>You</h2><div class="grid2">
+    ${sel("filing_status", "Filing status", [["single","Single"],["mfj","Married filing jointly"],["mfs","Married filing separately"],["hoh","Head of household"]])}
+    ${sel("state", "State", states.length ? states : [[S.state || "TX", S.state || "TX"]])}
+    ${num("age_end_of_year", "Age at year end", "50+ adds catch-up limits")}
+    ${txt("as_of_date", "As-of date", "date", "str")}
+  </div><div class="hint">As-of date: paychecks on or before it keep your actual elections and the recommendation applies to later ones. Leave empty to plan the whole year.</div>
+  <div class="grid2" style="margin-top:8px">${num("monthly_expenses", "Monthly expenses (optional)")}</div></div>`;
+
+  h += `<div class="card"><h2>Pay</h2><div class="grid2">
+    ${num("pay.base_salary", "Base salary")}
+    ${sel("pay.frequency", "Pay frequency", [["weekly","Weekly"],["biweekly","Every 2 weeks"],["semimonthly","Twice a month"],["monthly","Monthly"]], "str", true)}
+    ${(freq === "weekly" || freq === "biweekly") ? txt("pay.first_pay_date", "Any real pay date", "date") : ""}
+  </div>
+  <label class="check"><input type="checkbox" data-p="_hasRaise" data-t="bool" ${hasRaise ? "checked" : ""}><span>I get a raise this year</span></label>`;
+  if (hasRaise) {
+    h += `<div class="item"><div class="grid2">
+      ${txt("pay.raise.effective_date", "Effective date", "date")}
+      <label>Raise as<select data-act="raise-mode"><option value="percent" ${raiseMode==="percent"?"selected":""}>Percent</option><option value="new_salary" ${raiseMode==="new_salary"?"selected":""}>New salary</option></select></label>
+      ${raiseMode === "percent" ? num("pay.raise.percent", "Percent raise") : num("pay.raise.new_salary", "New salary")}
+    </div></div>`;
+  }
+  h += `<h2 style="margin-top:12px">Bonuses</h2>`;
+  S.pay.bonuses.forEach((b, i) => {
+    const mode = b.percent_of_salary != null && b.amount == null ? "percent_of_salary" : "amount";
+    h += `<div class="item"><div class="head"><span>${esc(b.name || "Bonus " + (i + 1))}</span><button class="link danger" data-act="del-bonus" data-i="${i}">Remove</button></div>
+      <div class="grid2">
+        ${txt(`pay.bonuses.${i}.name`, "Name (e.g. retention)")}
+        ${txt(`pay.bonuses.${i}.pay_date`, "Pay date", "date")}
+        <label>Amount as<select data-act="bonus-mode" data-i="${i}"><option value="amount" ${mode==="amount"?"selected":""}>Dollars</option><option value="percent_of_salary" ${mode==="percent_of_salary"?"selected":""}>% of salary</option></select></label>
+        ${num(`pay.bonuses.${i}.${mode}`, mode === "amount" ? "Dollars" : "% of salary")}
+        ${tri(`pay.bonuses.${i}.eligible_for_employee_contributions`, "401(k) taken from it?")}
+        ${tri(`pay.bonuses.${i}.eligible_for_match`, "Employer match on it?")}
+        ${tri(`pay.bonuses.${i}.eligible_for_nonelective`, "Employer unmatched on it?")}
+      </div>
+      ${chk(`pay.bonuses.${i}.separate_paycheck`, "Separate off-cycle paycheck (otherwise added to the regular paycheck on that date)")}
+    </div>`;
+  });
+  h += `<button data-act="add-bonus">+ Add a bonus</button></div>`;
+
+  h += `<div class="card"><h2>401(k) elections</h2>
+    ${sel("contributions.posttax_type", "Post-tax money is", [["roth","Roth 401(k)"],["after_tax","After-tax, non-Roth (mega backdoor)"]], "str", true)}`;
+  if (afterTax) {
+    h += `${chk("contributions.acknowledge_mega_backdoor", "I understand after-tax contributions only make sense if my plan allows an in-plan Roth conversion or an in-service rollover to a Roth IRA (mega backdoor Roth).", true)}`;
+    if (!ack) h += `<div class="notice">After-tax figures are hidden and ignored until you confirm above.</div>`;
+  }
+  c.elections.forEach((e, i) => {
+    h += `<div class="item"><div class="head"><span>Election ${i + 1}</span>${c.elections.length > 1 ? `<button class="link danger" data-act="del-election" data-i="${i}">Remove</button>` : ""}</div>
+      <div class="grid2">
+        ${txt(`contributions.elections.${i}.effective_date`, "Takes effect on pay date", "date")}
+        ${num(`contributions.elections.${i}.pretax_percent`, "Pretax %")}
+        ${postOn ? num(`contributions.elections.${i}.posttax_percent`, (afterTax ? "After-tax" : "Roth") + " %") : ""}
+      </div></div>`;
+  });
+  h += `<button data-act="add-election">+ Add an election change</button>
+    <div class="hint">Each election applies from its date onward. Percentages are of eligible pay; elections near 100% take whatever is left after taxes, HSA, premiums and pretax.</div>
+    ${chk("contributions.bonus_eligible_for_employee_contributions", "Default: bonuses have my 401(k) % taken from them")}
+  </div>`;
+
+  h += `<div class="card"><h2>Employer</h2><div class="grid2">
+    ${num("contributions.employer.match_rate_percent", "Match rate %", "50 = 50 cents per dollar")}
+    ${num("contributions.employer.match_up_to_percent_of_pay", "…up to % of pay")}
+    ${num("contributions.employer.nonelective_percent", "Unmatched contribution %")}
+  </div>
+  ${chk("contributions.employer.bonus_eligible_for_match", "Default: match is paid on bonuses")}
+  ${chk("contributions.employer.bonus_eligible_for_nonelective", "Default: unmatched contribution is paid on bonuses")}</div>`;
+
+  h += `<div class="card"><h2>Payroll deductions (per regular paycheck)</h2><div class="grid2">
+    ${num("deductions.hsa_per_paycheck", "HSA")}
+    ${sel("deductions.hsa_coverage", "HSA coverage", [["","Skip limit check"],["self","Self-only"],["family","Family"]])}
+    ${num("deductions.other_pretax_per_paycheck", "Premiums / FSA (pretax)")}
+    ${num("deductions.other_posttax_per_paycheck", "Other post-tax")}
+  </div></div>`;
+
+  h += `<div class="card"><h2>Recommendation settings</h2><div class="grid2">
+    ${txt("recommendation.target_employee_contribution", "Pretax/Roth target ($ or max)", "text", "maxnum")}
+    ${afterTax && ack ? txt("recommendation.target_total_additions", "Total target ($, max or none)", "text", "maxnum") : ""}
+    ${!afterTax ? num("recommendation.expected_retirement_marginal_rate_percent", "Retirement tax rate %", "Decides pretax vs Roth") : ""}
+    ${num("recommendation.percent_step", "Plan percent step")}
+    ${num("recommendation.plan_max_percent", "Plan max %")}
+  </div></div>`;
+
+  $("form").innerHTML = h;
+}
+
+// ---- form events ------------------------------------------------------------
+function convert(el) {
+  const t = el.dataset.t;
+  if (t === "num") return el.value === "" ? undefined : parseFloat(el.value);
+  if (t === "bool") return el.checked;
+  if (t === "tri") return el.value === "" ? undefined : el.value === "true";
+  if (t === "maxnum") { const v = el.value.trim().toLowerCase(); return v === "" ? undefined : (v === "max" || v === "none") ? v : (isFinite(v) ? parseFloat(v) : el.value); }
+  return el.value === "" ? undefined : el.value;
+}
+$("form").addEventListener("input", onEdit);
+$("form").addEventListener("change", onEdit);
+function onEdit(ev) {
+  const el = ev.target;
+  if (el.dataset.act === "raise-mode") {
+    const r = S.pay.raise || {}; const v = r.percent ?? r.new_salary;
+    delete r.percent; delete r.new_salary; r[el.value] = v; S.pay.raise = r; renderForm(); return schedule();
+  }
+  if (el.dataset.act === "bonus-mode") {
+    const b = S.pay.bonuses[+el.dataset.i]; const v = b.amount ?? b.percent_of_salary;
+    delete b.amount; delete b.percent_of_salary; b[el.value] = v; renderForm(); return schedule();
+  }
+  const p = el.dataset.p; if (!p) return;
+  if (p === "_hasRaise") {
+    if (el.checked) S.pay.raise = {effective_date: "", percent: 3}; else delete S.pay.raise;
+    renderForm(); return schedule();
+  }
+  setPath(S, p, convert(el));
+  if (ev.type === "change" && el.dataset.re) renderForm();
+  schedule();
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-act]"); if (!b) return;
+  const i = +b.dataset.i, a = b.dataset.act;
+  if (a === "add-bonus") S.pay.bonuses.push({name: "", pay_date: "", amount: 0});
+  else if (a === "del-bonus") S.pay.bonuses.splice(i, 1);
+  else if (a === "add-election") { const e = S.contributions.elections; const last = e[e.length - 1] || {};
+    e.push({effective_date: "", pretax_percent: last.pretax_percent ?? 0, posttax_percent: last.posttax_percent ?? 0}); }
+  else if (a === "del-election") S.contributions.elections.splice(i, 1);
+  else return;
+  renderForm(); schedule();
+});
+
+// ---- calculate ----------------------------------------------------------------
+function payload() { return clean(JSON.parse(JSON.stringify(S))); }
+function schedule() { clearTimeout(TIMER); $("status").textContent = "Calculating…"; TIMER = setTimeout(calc, 350); }
+async function calc() {
+  const my = ++SEQ;
+  try {
+    const res = await fetch("/api/analyze", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload())});
+    const d = await res.json();
+    if (my !== SEQ) return;
+    if (!res.ok) { showError(d.error || "Could not calculate"); return; }
+    LAST = d; $("status").textContent = "Up to date"; renderResults();
+  } catch (e) { if (my === SEQ) showError("Could not reach the local server: " + e.message); }
+}
+function showError(msg) {
+  $("status").textContent = "Needs attention";
+  const box = `<div class="error"><strong>Cannot calculate yet.</strong> ${esc(msg)}</div>`;
+  $("results").innerHTML = box + (LAST ? `<div class="dim">${resultsHTML()}</div>` : "");
+}
+
+// ---- results ---------------------------------------------------------------------
+function seg() {
+  return `<div class="seg">${["current", "recommended"].map((k) => `<button data-view="${k}" class="${VIEW === k ? "on" : ""}">${k === "current" ? "Current elections" : "Recommended"}</button>`).join("")}</div>`;
+}
+function table(head, rows, opts = {}) {
+  return `<div class="tablewrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function resultsHTML() {
+  const d = LAST, m = d.meta, cur = d.current, rec = d.recommended, R = d.recommendation;
+  let h = "";
+  const recText = `${pct(R.pretax_percent)} pretax` + (m.after_tax_enabled && R.posttax_percent != null ? ` + ${pct(R.posttax_percent)} ${m.posttax_type === "after_tax" ? "after-tax" : "Roth"}` : "");
+  h += `<div class="stats">
+    <div class="stat"><div class="k">Recommended elections</div><div class="v">${recText}</div><div class="s">${R.effective_from ? "from the paycheck on " + R.effective_from : ""}</div></div>
+    <div class="stat"><div class="k">Taxes (year)</div><div class="v">${money(rec.total_taxes, 0)}</div><div class="s">Current ${money(cur.total_taxes, 0)}</div></div>
+    <div class="stat"><div class="k">Net pay (year)</div><div class="v">${money(rec.net_pay, 0)}</div><div class="s">Current ${money(cur.net_pay, 0)}</div></div>
+    <div class="stat"><div class="k">Into 401(k), incl. employer</div><div class="v">${money(rec.total_additions, 0)}</div><div class="s">Current ${money(cur.total_additions, 0)}</div></div>
+  </div>`;
+  if (d.warnings.length) h += `<div class="card"><h2>Notes</h2><ul class="warnlist">${d.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`;
+
+  const lines = [];
+  lines.push(`${m.tax_year} · ${esc(m.state)} · ${m.filing_status} · ${m.paychecks} paychecks`);
+  if (m.raise) lines.push(`Raise to ${money(m.raise.new_salary, 0)} on ${m.raise.effective_date}`);
+  m.bonuses.forEach((b) => lines.push(`Bonus (${esc(b.name)}) ${money(b.gross, 0)} on ${b.date}, ${b.with_regular ? "with the regular paycheck" : "own paycheck"}; 401(k): ${b.employee ? "yes" : "no"}, match: ${b.match ? "yes" : "no"}, unmatched: ${b.unmatched ? "yes" : "no"}`));
+  m.elections.forEach((e) => lines.push(`Election from ${e.effective_date}: pretax ${pct(e.pretax)}${e.posttax != null ? ", post-tax " + pct(e.posttax) : ""}`));
+  h += `<div class="card"><h2>Inputs as understood</h2><div class="hint" style="margin:0">${lines.join("<br>")}</div></div>`;
+
+  h += `<div class="card"><h2>Summary</h2>${table(["", "Current", "Recommended"], d.summary.map((r) =>
+    r.section ? `<tr class="section"><td colspan="3">${esc(r.label)}</td></tr>` : `<tr><td>${esc(r.label)}</td><td>${esc(r.current)}</td><td>${esc(r.recommended)}</td></tr>`).join(""))}</div>`;
+
+  h += `<div class="card">${seg()}`;
+  const sc = d[VIEW];
+  if (m.after_tax_enabled && sc.posttax_by_paycheck.length) {
+    const rows = sc.posttax_by_paycheck;
+    h += `<h2>Post-tax election vs. available pay</h2><div class="hint" style="margin:0 0 6px">Taxes, HSA, premiums and pretax 401(k) come out first. The election takes what it asks for, limited by what is left.</div>` +
+      table(["Date", "Elected", "Available", "Deducted", "Left over", "What happened"],
+        rows.map((r) => `<tr><td>${r.date}</td><td>${money(r.elected)}</td><td>${money(r.available)}</td><td>${money(r.deducted)}</td><td>${money(r.left_over)}</td><td class="note"><span class="pill ${r.status}">${r.status === "full" ? "Full" : r.status === "limit" ? "415(c) limit" : "Take-home"}</span> ${esc(r.note)}</td></tr>`).join("") +
+        `<tr class="total"><td>Total</td><td>${money(rows.reduce((a, r) => a + r.elected, 0))}</td><td>${money(rows.reduce((a, r) => a + r.available, 0))}</td><td>${money(rows.reduce((a, r) => a + r.deducted, 0))}</td><td>${money(rows.reduce((a, r) => a + r.left_over, 0))}</td><td></td></tr>`);
+  }
+  const mon = sc.monthly, MN = ["", "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const cols = [["Gross","gross"],["Taxes","taxes"],["HSA/prem/other","other"],["Pretax 401k","pretax"]];
+  if (m.after_tax_enabled) cols.push(["Post-tax","posttax"]);
+  cols.push(["Net pay","net"],["Pretax cost*","pretax_cost"]);
+  if (m.after_tax_enabled) cols.push(["Total cost*","total_cost"]);
+  if (m.monthly_expenses != null) cols.push(["From savings","from_savings"]);
+  h += `<h2 style="margin-top:16px">Monthly cash flow</h2>` + table(["Month", ...cols.map((c) => c[0])],
+    mon.map((r) => `<tr><td>${MN[r.month]}</td>${cols.map(([_, k]) => `<td class="${k === "net" && r.net < 0.5 ? "zero" : ""}">${money(r[k])}</td>`).join("")}</tr>`).join("") +
+    `<tr class="total"><td>Total</td>${cols.map(([_, k]) => `<td>${money(mon.reduce((a, r) => a + r[k], 0))}</td>`).join("")}</tr>`) +
+    `<div class="foot">* Cost = how much take-home drops because of the contribution. Pretax costs less than its face amount because it lowers taxes${m.after_tax_enabled ? "; post-tax costs its full amount" : ""}. Net pay of $0 is shown in red.${m.monthly_expenses != null ? ` From savings = monthly expenses (${money(m.monthly_expenses, 0)}) minus net pay when net pay falls short.` : ""}</div>`;
+
+  h += `<details style="margin-top:14px"><summary>Every paycheck</summary>` + table(
+    ["Date", "Type", "Gross", "Pretax", ...(m.after_tax_enabled ? ["Post-tax"] : []), "Match", "Unmatched", "HSA", "Premiums", "Other post-tax"],
+    sc.paychecks.map((r) => `<tr><td>${r.date}</td><td>${esc(r.kind === "regular" ? "regular" : r.kind + (r.label ? " (" + r.label + ")" : ""))}</td><td>${money(r.gross)}</td><td>${money(r.pretax)}</td>${m.after_tax_enabled ? `<td>${money(r.posttax)}</td>` : ""}<td>${money(r.match)}</td><td>${money(r.unmatched)}</td><td>${money(r.hsa)}</td><td>${money(r.other_pretax)}</td><td>${money(r.other_posttax)}</td></tr>`).join("")) + `</details></div>`;
+  h += `<div class="foot">Estimates only: salary alone, no spouse income, credits, local taxes or itemized deductions. Net pay uses your year's average tax rate, so a bonus paycheck's real withholding will differ.</div>`;
+  return h;
+}
+function renderResults() {
+  $("results").innerHTML = resultsHTML();
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-view]"); if (!b) return;
+  VIEW = b.dataset.view; if (LAST) renderResults();
+});
+
+// ---- load / save -------------------------------------------------------------------
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2600); }
+$("save").addEventListener("click", async () => {
+  const res = await fetch("/api/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload())});
+  const d = await res.json();
+  if (res.ok) { toast("Saved to " + d.saved); $("banner").hidden = true; } else toast(d.error || "Could not save");
+});
+$("reset").addEventListener("click", () => {
+  if (!EXAMPLE) return;
+  if (!confirm("Replace the form with the example numbers? Your saved file is not changed until you press Save.")) return;
+  S = JSON.parse(JSON.stringify(EXAMPLE)); ensure(); renderForm(); schedule();
+});
+(async function init() {
+  const [m, c] = await Promise.all([fetch("/api/meta").then((r) => r.json()), fetch("/api/config").then((r) => r.json())]);
+  META = m; S = c.config; EXAMPLE = c.example;
+  if (c.source === "example") {
+    $("banner").hidden = false;
+    $("banner").textContent = "These are example numbers, not yours. Replace them, then press Save inputs (saved to " + c.path + ").";
+  }
+  ensure(); renderForm(); calc();
+})();
+</script>
+</body>
+</html>

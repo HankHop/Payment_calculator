@@ -3,14 +3,27 @@
 Estimates 2026 federal, state and FICA taxes for one wage earner and recommends pretax and
 post-tax (Roth or after-tax) 401(k) contribution percentages. Python 3.9+, standard library only.
 
-## Run
+## Run the GUI
+
+```
+python -m paycalc.gui            # opens http://127.0.0.1:8765/ in your browser
+python -m paycalc.gui --port 9000 --config my_inputs.json --no-browser
+```
+
+A form on the left, results on the right, recalculated as you type: summary of current vs
+recommended, post-tax election vs available pay per paycheck, monthly cash flow, and every
+paycheck. Press "Save inputs" to keep your numbers in `config.local.json` (git-ignored). Until
+you save, the form shows the example numbers. The server listens on 127.0.0.1 only, rejects
+requests addressed to any other host name, and sends nothing off your machine.
+
+## Run from the command line
 
 ```
 cp examples/example_config.json config.json     # config.json is git-ignored
 python -m paycalc config.json                   # summary: current vs recommended
 python -m paycalc config.json --schedule        # plus contributions on every pay date
 python -m paycalc config.json --json            # machine-readable
-python -m unittest discover -s tests            # tests
+python -m unittest discover -s tests            # tests (includes the GUI server)
 ```
 
 ## Inputs (config.json)
