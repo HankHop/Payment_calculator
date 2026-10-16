@@ -20,6 +20,10 @@ PAGE = Path(__file__).parent / "web" / "index.html"
 EXAMPLE = Path(__file__).parent.parent / "examples" / "example_config.json"
 MAX_BODY = 1_000_000
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+# The page is one file with inline script/style, so those two keep 'unsafe-inline'; everything else is locked down.
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+       "form-action 'self'; frame-ancestors 'none'")
 
 
 def _fallback_config() -> dict:
@@ -48,8 +52,11 @@ def make_handler(config_path: Path):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy",
-                             "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
             self.end_headers()
             self.wfile.write(body)
 
@@ -60,6 +67,18 @@ def make_handler(config_path: Path):
             # Blocks DNS-rebinding: only answer requests addressed to localhost.
             host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
             return host in LOCAL_HOSTS
+
+        def _same_origin(self) -> bool:
+            # CSRF defence in depth: reject requests a browser marks as cross-site, and any Origin
+            # that is not this server.
+            site = self.headers.get("Sec-Fetch-Site")
+            if site is not None and site not in ("same-origin", "none"):
+                return False
+            origin = self.headers.get("Origin")
+            if origin is None:
+                return True
+            host = self.headers.get("Host") or ""
+            return origin in (f"http://{host}",)
 
         def do_GET(self):
             if not self._local_only():
@@ -81,7 +100,7 @@ def make_handler(config_path: Path):
             return self._json(404, {"error": "not found"})
 
         def do_POST(self):
-            if not self._local_only():
+            if not self._local_only() or not self._same_origin():
                 return self._json(403, {"error": "forbidden"})
             if "application/json" not in (self.headers.get("Content-Type") or ""):
                 return self._json(415, {"error": "expected application/json"})
@@ -99,13 +118,17 @@ def make_handler(config_path: Path):
                     return self._json(200, run_analysis(raw))
                 if self.path == "/api/save":
                     parse(raw)  # refuse to save something that cannot be calculated
-                    config_path.write_text(json.dumps(raw, indent=2) + "\n")
+                    tmp = config_path.with_name(config_path.name + ".tmp")
+                    tmp.write_text(json.dumps(raw, indent=2) + "\n")
+                    tmp.replace(config_path)
                     return self._json(200, {"saved": str(config_path)})
                 return self._json(404, {"error": "not found"})
             except (ConfigError, json.JSONDecodeError) as exc:
                 return self._json(400, {"error": str(exc)})
-            except (KeyError, TypeError, ValueError, AttributeError) as exc:
-                return self._json(400, {"error": f"invalid input: {exc!r}"})
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return self._json(400, {"error": "invalid input: a field has the wrong type or is missing"})
+            except Exception:
+                return self._json(500, {"error": "internal error"})
 
     return Handler
 

@@ -100,3 +100,58 @@ class GuiServerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GuiSecurityTest(unittest.TestCase):
+    """Project CodeGuard checks: headers, CSRF, error handling, file writes."""
+    setUpClass = classmethod(GuiServerTest.setUpClass.__func__)
+    tearDownClass = classmethod(GuiServerTest.tearDownClass.__func__)
+    request = GuiServerTest.request
+
+    def test_security_headers(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/")
+        r = conn.getresponse(); r.read(); conn.close()
+        csp = r.getheader("Content-Security-Policy")
+        for d in ("frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'self'"):
+            self.assertIn(d, csp)
+        self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
+        self.assertEqual(r.getheader("Referrer-Policy"), "no-referrer")
+        self.assertEqual(r.getheader("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(r.getheader("Cache-Control"), "no-store")
+
+    def test_cross_site_post_rejected(self):
+        for hdr in ({"Sec-Fetch-Site": "cross-site"}, {"Origin": "http://evil.example"}):
+            status, _ = self.request("POST", "/api/analyze", EXAMPLE, hdr)
+            self.assertEqual(status, 403, hdr)
+
+    def test_same_origin_post_allowed(self):
+        status, _ = self.request("POST", "/api/analyze", EXAMPLE,
+                                 {"Origin": f"http://127.0.0.1:{self.port}", "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(status, 200)
+
+    def test_errors_do_not_leak_internals(self):
+        bad = json.loads(json.dumps(EXAMPLE)); bad["pay"] = "x"
+        status, raw = self.request("POST", "/api/analyze", bad)
+        self.assertEqual(status, 400)
+        text = raw.decode()
+        for leak in ("Traceback", ".py", "TypeError", "AttributeError", "KeyError"):
+            self.assertNotIn(leak, text)
+
+    def test_save_cannot_be_redirected_by_client(self):
+        cfg = json.loads(json.dumps(EXAMPLE)); cfg["path"] = "/tmp/pwned.json"
+        Path("/tmp/pwned.json").unlink(missing_ok=True)
+        status, _ = self.request("POST", "/api/save", cfg)
+        self.assertEqual(status, 200)
+        status, _ = self.request("POST", "/api/save?path=/tmp/pwned.json", cfg)
+        self.assertEqual(status, 404)
+        self.assertFalse(Path("/tmp/pwned.json").exists())
+        self.assertTrue(self.cfg_path.exists())
+
+    def test_page_guards_prototype_keys(self):
+        html = (Path(gui.__file__).parent / "web" / "index.html").read_text()
+        for k in ("__proto__", "constructor", "prototype"):
+            self.assertIn(f'"{k}"', html)
+        self.assertNotIn("eval(", html)
+        self.assertNotIn("new Function", html)
+        self.assertNotIn("document.write", html)

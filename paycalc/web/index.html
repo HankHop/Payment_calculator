@@ -108,8 +108,11 @@ const pct = (n) => (n == null ? "" : (+n).toString() + "%");
 
 // ---- state helpers --------------------------------------------------------
 function getPath(o, p) { return p.split(".").reduce((a, k) => (a == null ? undefined : a[k]), o); }
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 function setPath(o, p, v) {
-  const keys = p.split("."); let cur = o;
+  const keys = p.split(".");
+  if (keys.some((k) => UNSAFE_KEYS.has(k))) return;
+  let cur = o;
   keys.slice(0, -1).forEach((k, i) => {
     if (cur[k] == null) cur[k] = /^\d+$/.test(keys[i + 1]) ? [] : {};
     cur = cur[k];
@@ -131,6 +134,7 @@ function clean(v) {
   if (v && typeof v === "object") {
     const o = {};
     for (const [k, x] of Object.entries(v)) {
+      if (UNSAFE_KEYS.has(k)) continue;
       const c = clean(x);
       if (c === null || c === undefined || c === "") continue;
       if (typeof c === "number" && Number.isNaN(c)) continue;
@@ -335,9 +339,9 @@ function resultsHTML() {
   if (d.warnings.length) h += `<div class="card"><h2>Notes</h2><ul class="warnlist">${d.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`;
 
   const lines = [];
-  lines.push(`${m.tax_year} · ${esc(m.state)} · ${m.filing_status} · ${m.paychecks} paychecks`);
+  lines.push(`${m.tax_year} · ${esc(m.state)} · ${esc(m.filing_status)} · ${m.paychecks} paychecks`);
   if (m.raise) lines.push(`Raise to ${money(m.raise.new_salary, 0)} on ${m.raise.effective_date}`);
-  m.bonuses.forEach((b) => lines.push(`Bonus (${esc(b.name)}) ${money(b.gross, 0)} on ${b.date}, ${b.with_regular ? "with the regular paycheck" : "own paycheck"}; 401(k): ${b.employee ? "yes" : "no"}, match: ${b.match ? "yes" : "no"}, unmatched: ${b.unmatched ? "yes" : "no"}`));
+  m.bonuses.forEach((b) => lines.push(`Bonus (${esc(b.name)}) ${money(b.gross, 0)} on ${esc(b.date)}, ${b.with_regular ? "with the regular paycheck" : "own paycheck"}; 401(k): ${b.employee ? "yes" : "no"}, match: ${b.match ? "yes" : "no"}, unmatched: ${b.unmatched ? "yes" : "no"}`));
   m.elections.forEach((e) => lines.push(`Election from ${e.effective_date}: pretax ${pct(e.pretax)}${e.posttax != null ? ", post-tax " + pct(e.posttax) : ""}`));
   h += `<div class="card"><h2>Inputs as understood</h2><div class="hint" style="margin:0">${lines.join("<br>")}</div></div>`;
 
@@ -350,7 +354,7 @@ function resultsHTML() {
     const rows = sc.posttax_by_paycheck;
     h += `<h2>Post-tax election vs. available pay</h2><div class="hint" style="margin:0 0 6px">Taxes, HSA, premiums and pretax 401(k) come out first. The election takes what it asks for, limited by what is left.</div>` +
       table(["Date", "Elected", "Available", "Deducted", "Left over", "What happened"],
-        rows.map((r) => `<tr><td>${r.date}</td><td>${money(r.elected)}</td><td>${money(r.available)}</td><td>${money(r.deducted)}</td><td>${money(r.left_over)}</td><td class="note"><span class="pill ${r.status}">${r.status === "full" ? "Full" : r.status === "limit" ? "415(c) limit" : "Take-home"}</span> ${esc(r.note)}</td></tr>`).join("") +
+        rows.map((r) => `<tr><td>${esc(r.date)}</td><td>${money(r.elected)}</td><td>${money(r.available)}</td><td>${money(r.deducted)}</td><td>${money(r.left_over)}</td><td class="note"><span class="pill ${esc(r.status)}">${r.status === "full" ? "Full" : r.status === "limit" ? "415(c) limit" : "Take-home"}</span> ${esc(r.note)}</td></tr>`).join("") +
         `<tr class="total"><td>Total</td><td>${money(rows.reduce((a, r) => a + r.elected, 0))}</td><td>${money(rows.reduce((a, r) => a + r.available, 0))}</td><td>${money(rows.reduce((a, r) => a + r.deducted, 0))}</td><td>${money(rows.reduce((a, r) => a + r.left_over, 0))}</td><td></td></tr>`);
   }
   const mon = sc.monthly, MN = ["", "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -366,7 +370,7 @@ function resultsHTML() {
 
   h += `<details style="margin-top:14px"><summary>Every paycheck</summary>` + table(
     ["Date", "Type", "Gross", "Pretax", ...(m.after_tax_enabled ? ["Post-tax"] : []), "Match", "Unmatched", "HSA", "Premiums", "Other post-tax"],
-    sc.paychecks.map((r) => `<tr><td>${r.date}</td><td>${esc(r.kind === "regular" ? "regular" : r.kind + (r.label ? " (" + r.label + ")" : ""))}</td><td>${money(r.gross)}</td><td>${money(r.pretax)}</td>${m.after_tax_enabled ? `<td>${money(r.posttax)}</td>` : ""}<td>${money(r.match)}</td><td>${money(r.unmatched)}</td><td>${money(r.hsa)}</td><td>${money(r.other_pretax)}</td><td>${money(r.other_posttax)}</td></tr>`).join("")) + `</details></div>`;
+    sc.paychecks.map((r) => `<tr><td>${esc(r.date)}</td><td>${esc(r.kind === "regular" ? "regular" : r.kind + (r.label ? " (" + r.label + ")" : ""))}</td><td>${money(r.gross)}</td><td>${money(r.pretax)}</td>${m.after_tax_enabled ? `<td>${money(r.posttax)}</td>` : ""}<td>${money(r.match)}</td><td>${money(r.unmatched)}</td><td>${money(r.hsa)}</td><td>${money(r.other_pretax)}</td><td>${money(r.other_posttax)}</td></tr>`).join("")) + `</details></div>`;
   h += `<div class="foot">Estimates only: salary alone, no spouse income, credits, local taxes or itemized deductions. Net pay uses your year's average tax rate, so a bonus paycheck's real withholding will differ.</div>`;
   return h;
 }
