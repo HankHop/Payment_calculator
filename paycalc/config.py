@@ -27,6 +27,11 @@ class Bonus:
     amount: Optional[float]               # fixed dollars, or None
     percent_of_salary: Optional[float]    # % of base salary in effect on pay_date, or None
     separate_paycheck: bool = False       # False: paid with the regular paycheck when dates match
+    name: str = ""
+    # Per-bonus eligibility; None = use the global flags under contributions / employer.
+    eligible_for_employee_contributions: Optional[bool] = None
+    eligible_for_match: Optional[bool] = None
+    eligible_for_nonelective: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -86,7 +91,7 @@ class Config:
     frequency: str
     first_pay_date: Optional[date]
     raise_: Optional[Raise]
-    bonus: Optional[Bonus]
+    bonuses: tuple                        # tuple[Bonus, ...]
     contributions: Contributions
     recommendation: Recommendation
     deductions: Deductions
@@ -152,16 +157,25 @@ def parse(raw: dict) -> Config:
             raise ConfigError("pay.raise: give either new_salary or percent")
         raise_ = Raise(eff, new)
 
-    bonus = None
+    raw_bonuses = list(pay.get("bonuses") or [])
     if pay.get("bonus"):
-        b = pay["bonus"]
-        d = _in_year(_date(b.get("pay_date"), "pay.bonus.pay_date"), year, "pay.bonus.pay_date")
+        raw_bonuses.insert(0, pay["bonus"])
+    bonuses = []
+    for i, b in enumerate(raw_bonuses):
+        f = f"pay.bonuses[{i}]"
+        d = _in_year(_date(b.get("pay_date"), f"{f}.pay_date"), year, f"{f}.pay_date")
         amount, pct = b.get("amount"), b.get("percent_of_salary")
         if (amount is None) == (pct is None):
-            raise ConfigError("pay.bonus: give exactly one of amount or percent_of_salary")
-        bonus = Bonus(d, float(amount) if amount is not None else None,
-                      _pct(pct, "pay.bonus.percent_of_salary", 0, 1000) if pct is not None else None,
-                      bool(b.get("separate_paycheck", False)))
+            raise ConfigError(f"{f}: give exactly one of amount or percent_of_salary")
+        flags = {}
+        for key in ("eligible_for_employee_contributions", "eligible_for_match", "eligible_for_nonelective"):
+            v = b.get(key)
+            if v is not None and not isinstance(v, bool):
+                raise ConfigError(f"{f}.{key}: true or false")
+            flags[key] = v
+        bonuses.append(Bonus(d, float(amount) if amount is not None else None,
+                             _pct(pct, f"{f}.percent_of_salary", 0, 1000) if pct is not None else None,
+                             bool(b.get("separate_paycheck", False)), str(b.get("name", "")), **flags))
 
     c = raw.get("contributions") or {}
     e = c.get("employer") or {}
@@ -230,7 +244,7 @@ def parse(raw: dict) -> Config:
         _pct(d.get("other_pretax_per_paycheck", 0), "deductions.other_pretax_per_paycheck", 0, 1e7),
         _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7))
 
-    return Config(year, status, state, age, as_of, float(salary), freq, first_pay, raise_, bonus,
+    return Config(year, status, state, age, as_of, float(salary), freq, first_pay, raise_, tuple(bonuses),
                   contributions, recommendation, deductions,
                   None if raw.get("monthly_expenses") is None
                   else _pct(raw["monthly_expenses"], "monthly_expenses", 0, 1e9))

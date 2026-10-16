@@ -63,6 +63,7 @@ class EventRow:
     other_posttax: float = 0.0
     posttax_requested: float = 0.0              # what the election asks for on this paycheck
     posttax_available: Optional[float] = None   # pay left for it after taxes and deductions
+    label: str = ""                             # bonus name(s) paid in this paycheck
 
 
 @dataclass
@@ -202,5 +203,6 @@ def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
             result.total_cap_reached_on = ev.pay_date
 
         result.rows.append(EventRow(ev.pay_date, ev.kind, ev.gross, pre, post, match, nonelective,
-                                    ev.hsa, ev.other_pretax, ev.other_posttax, requested, available))
+                                    ev.hsa, ev.other_pretax, ev.other_posttax, requested, available,
+                                    ev.bonus_label))
     return result

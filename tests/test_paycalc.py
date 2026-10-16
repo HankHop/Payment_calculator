@@ -461,6 +461,90 @@ class TestRealLifeDeductions(unittest.TestCase):
         self.assertLessEqual(loaded.recommendation.posttax_percent, base.recommendation.posttax_percent)
 
 
+class TestMultipleBonuses(unittest.TestCase):
+    def _cfg(self, **kw):
+        return cfg_from(
+            state="TX",
+            pay={"base_salary": 104000,   # 4,000 per biweekly paycheck
+                 "bonuses": [
+                     {"name": "annual", "pay_date": "2026-03-13", "amount": 10000},
+                     {"name": "retention", "pay_date": "2026-09-11", "amount": 20000,
+                      "eligible_for_employee_contributions": True, "eligible_for_match": True}]},
+            contributions={"pretax_percent": 10, "posttax_percent": 0,
+                           "employer": {"match_rate_percent": 100, "match_up_to_percent_of_pay": 5}},
+            **kw)
+
+    def test_each_bonus_uses_its_own_eligibility(self):
+        events = {e.pay_date: e for e in build_events(self._cfg())}
+        annual, retention = events[date(2026, 3, 13)], events[date(2026, 9, 11)]
+        self.assertAlmostEqual(annual.gross, 14000)
+        self.assertAlmostEqual(annual.deferral_comp, 4000)       # annual bonus excluded
+        self.assertAlmostEqual(annual.match_comp, 4000)
+        self.assertAlmostEqual(retention.gross, 24000)
+        self.assertAlmostEqual(retention.deferral_comp, 24000)   # retention bonus included
+        self.assertAlmostEqual(retention.match_comp, 24000)
+        self.assertEqual(annual.bonus_label, "annual")
+        self.assertEqual(retention.bonus_label, "retention")
+
+    def test_contributions_only_on_the_eligible_bonus(self):
+        cfg = self._cfg()
+        r = simulate(build_events(cfg), make_plan(cfg, FED, 10, 0))
+        self.assertAlmostEqual(r.pretax, 0.10 * (104000 + 20000))
+        self.assertAlmostEqual(r.gross, 104000 + 30000)
+        self.assertAlmostEqual(r.match, 0.05 * (104000 + 20000))
+
+    def test_global_flag_is_the_default_for_each_bonus(self):
+        cfg = cfg_from(pay={"bonuses": [{"pay_date": "2026-03-13", "amount": 5000},
+                                        {"pay_date": "2026-04-10", "amount": 5000,
+                                         "eligible_for_employee_contributions": False}]},
+                       contributions={"pretax_percent": 10, "bonus_eligible_for_employee_contributions": True})
+        events = {e.pay_date: e for e in build_events(cfg)}
+        self.assertAlmostEqual(events[date(2026, 3, 13)].deferral_comp, 100000 / 26 + 5000)
+        self.assertAlmostEqual(events[date(2026, 4, 10)].deferral_comp, 100000 / 26)
+
+    def test_two_bonuses_on_one_payday_and_off_cycle(self):
+        cfg = cfg_from(pay={"bonuses": [
+            {"name": "a", "pay_date": "2026-03-13", "amount": 1000},
+            {"name": "b", "pay_date": "2026-03-13", "amount": 2000},
+            {"name": "c", "pay_date": "2026-03-20", "amount": 3000}]})   # not a pay date
+        events = build_events(cfg)
+        merged = [e for e in events if e.kind == "regular+bonus"]
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].bonus_label, "a, b")
+        self.assertAlmostEqual(merged[0].bonus_amount, 3000)
+        self.assertEqual(len([e for e in events if e.kind == "bonus"]), 1)
+
+    def test_legacy_single_bonus_key_still_works(self):
+        cfg = cfg_from(pay={"bonus": {"pay_date": "2026-03-13", "amount": 5000}})
+        self.assertEqual(len(cfg.bonuses), 1)
+
+    def test_report_lists_each_bonus_and_names_it_in_the_election_table(self):
+        cfg = bonus_month_cfg(pay={"bonuses": [
+            {"name": "annual", "pay_date": "2026-03-13", "amount": 30000},
+            {"name": "retention", "pay_date": "2026-09-11", "amount": 20000,
+             "eligible_for_employee_contributions": True}]})
+        text = report.text(analyze(cfg))
+        self.assertIn("Bonus (annual)", text)
+        self.assertIn("Bonus (retention)", text)
+        self.assertIn("includes retention", text)
+
+    def test_non_boolean_eligibility_rejected(self):
+        with self.assertRaises(config.ConfigError):
+            cfg_from(pay={"bonuses": [{"pay_date": "2026-03-13", "amount": 1,
+                                       "eligible_for_match": "yes"}]})
+
+
+class TestElectionNotes(unittest.TestCase):
+    def test_total_limit_is_named_when_it_stops_deductions(self):
+        a = analyze(bonus_month_cfg(pay={"base_salary": 400000}))
+        text = report.text(a)
+        self.assertIn("limited by the 415(c) total limit", text)
+
+    def test_take_home_is_named_when_pay_runs_out(self):
+        text = report.text(analyze(bonus_month_cfg()))
+        self.assertIn("limited by take-home", text)
+
+
 class TestMonthlyCashFlow(unittest.TestCase):
     def test_monthly_sums_match_year(self):
         a = analyze(bonus_month_cfg())

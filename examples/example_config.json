@@ -12,10 +12,19 @@
       "effective_date": "2026-07-01",
       "percent": 5
     },
-    "bonus": {
-      "pay_date": "2026-03-20",
-      "percent_of_salary": 10
-    }
+    "bonuses": [
+      {
+        "name": "annual bonus",
+        "pay_date": "2026-03-20",
+        "percent_of_salary": 10
+      },
+      {
+        "name": "retention bonus",
+        "pay_date": "2026-10-30",
+        "amount": 20000,
+        "eligible_for_employee_contributions": true
+      }
+    ]
   },
   "contributions": {
     "posttax_type": "after_tax",

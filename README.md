@@ -23,7 +23,7 @@ python -m unittest discover -s tests            # tests
 | `pay.base_salary`, `frequency`, `first_pay_date` | `weekly`, `biweekly`, `semimonthly` (15th and month end), `monthly` (month end). `first_pay_date` is any real pay date, required for weekly/biweekly; 27-paycheck years are handled |
 | `monthly_expenses` | Optional. Adds a "From savings" column to the monthly cash flow: expenses minus net pay, in months where net pay falls short |
 | `pay.raise` | `effective_date` plus `new_salary` or `percent`. Applies to pay dates on or after the effective date |
-| `pay.bonus` | `pay_date` plus `amount` or `percent_of_salary` (of the salary in effect that day). If the date is a regular payday the bonus is added to that paycheck (so one paycheck's take-home covers everything taken from it); otherwise, or with `"separate_paycheck": true`, it is an off-cycle paycheck |
+| `pay.bonuses` | List of bonuses, each with `pay_date`, `amount` or `percent_of_salary` (of the salary in effect that day), optional `name`, and optional `eligible_for_employee_contributions`, `eligible_for_match`, `eligible_for_nonelective`. Any flag left out falls back to the global flag below, so a regular bonus can be excluded while a retention bonus is included. `pay.bonus` (a single object) still works. A bonus on a regular payday is added to that paycheck (one paycheck's take-home covers everything taken from it); otherwise, or with `"separate_paycheck": true`, it is an off-cycle paycheck |
 | `deductions.hsa_per_paycheck`, `hsa_coverage` | Payroll HSA per regular paycheck; `hsa_coverage` (`self`/`family`) enables the annual limit check (55+ catch-up via `age_end_of_year`) |
 | `deductions.other_pretax_per_paycheck` | Medical/dental/vision premiums, FSA (Section 125): reduce income tax and FICA |
 | `deductions.other_posttax_per_paycheck` | Anything else taken after tax (life insurance, dues, ESPP) |
@@ -31,7 +31,7 @@ python -m unittest discover -s tests            # tests
 | `contributions.posttax_type` | `after_tax` = non-Roth after-tax money (counts toward the 415(c) total limit, not the 24,500 deferral limit; mega-backdoor style). `roth` (default) = Roth 401(k), shares the deferral limit with pretax |
 | `contributions.acknowledge_mega_backdoor` | Default `false`. While `posttax_type` is `after_tax` and this is false, all after-tax figures are hidden and after-tax elections are ignored. Set to `true` only if your plan allows an in-plan Roth conversion or in-service rollover to a Roth IRA |
 | `as_of_date` | Optional. Paychecks on or before it keep your actual elections; the recommendation applies to later paychecks only. Leave it out to plan the whole year from the first paycheck |
-| `contributions.bonus_eligible_for_employee_contributions` | Whether your % is taken from the bonus |
+| `contributions.bonus_eligible_for_employee_contributions` | Default for bonuses that do not set their own: whether your % is taken from the bonus |
 | `employer.match_rate_percent`, `match_up_to_percent_of_pay` | e.g. 50 and 6 = 50% of your first 6% |
 | `employer.nonelective_percent` | Unmatched employer contribution, % of eligible pay |
 | `employer.bonus_eligible_for_match`, `bonus_eligible_for_nonelective` | Whether those are paid on the bonus |

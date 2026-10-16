@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import List
 
 from .engine import Analysis, Scenario
+from .schedule import resolved_bonuses
 
 
 def _m(x: float) -> str:
@@ -66,12 +67,13 @@ def _election_lines(sc: Scenario, label: str) -> List[str]:
         avail = r.posttax_available or 0.0
         if r.posttax >= r.posttax_requested - 0.005:
             note = "full election met"
-        elif avail < r.posttax_requested - 0.005:
-            note = f"limited by take-home, {_m(r.posttax_requested - r.posttax)} of the election not deducted"
+        elif r.posttax < min(r.posttax_requested, avail) - 0.005:
+            note = (f"limited by the 415(c) total limit, "
+                    f"{_m(r.posttax_requested - r.posttax)} of the election not deducted")
         else:
-            note = "limited by the 415(c) total limit"
+            note = f"limited by take-home, {_m(r.posttax_requested - r.posttax)} of the election not deducted"
         if "bonus" in r.kind:
-            note += "; includes bonus"
+            note += f"; includes {r.label or 'bonus'}"
         out.append(f"  {str(r.pay_date):<12}{r.posttax_requested:>11,.2f}{avail:>12,.2f}"
                    f"{r.posttax:>11,.2f}{max(0.0, avail - r.posttax):>11,.2f}  {note}")
     out.append(f"  {'total':<12}{sum(r.posttax_requested for r in rows):>11,.2f}"
@@ -143,13 +145,11 @@ def text(a: Analysis, schedule: bool = False) -> str:
     out.append(f"Base salary {_m(cfg.base_salary)}, paid {cfg.frequency} ({sum(1 for e in a.events if e.kind != 'bonus')} paychecks)")
     if cfg.raise_:
         out.append(f"Raise to {_m(cfg.raise_.new_salary)} effective {cfg.raise_.effective_date}")
-    if cfg.bonus:
-        paid_with = ("with the regular paycheck" if any(e.kind == "regular+bonus" for e in a.events)
-                     else "as its own paycheck")
-        out.append(f"Bonus {_m(sum(e.bonus_amount for e in a.events))} paid {cfg.bonus.pay_date} ({paid_with}); "
-                   f"employee contributions on bonus: {'yes' if cfg.contributions.bonus_eligible_for_employee_contributions else 'no'}, "
-                   f"match: {'yes' if cfg.contributions.employer.bonus_eligible_for_match else 'no'}, "
-                   f"unmatched: {'yes' if cfg.contributions.employer.bonus_eligible_for_nonelective else 'no'}")
+    for b in resolved_bonuses(cfg):
+        where = "with the regular paycheck" if b.with_regular else "as its own paycheck"
+        out.append(f"Bonus ({b.name}) {_m(b.gross)} paid {b.pay_date} ({where}); "
+                   f"employee contributions: {'yes' if b.employee else 'no'}, "
+                   f"match: {'yes' if b.match else 'no'}, unmatched: {'yes' if b.nonelective else 'no'}")
     pt = "after-tax" if cfg.contributions.posttax_type == "after_tax" else "Roth"
     show_post = cfg.contributions.after_tax_enabled
     for el in cfg.contributions.elections:
