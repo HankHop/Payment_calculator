@@ -145,8 +145,8 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
         pre_pct = min(_round_to(rem_pre / rem_comp * 100, step), elective_pct)
         roth_pct = round(elective_pct - pre_pct, 6)
 
-    post_pct, rate = roth_pct, None
-    if after_tax:
+    post_pct, rate, total_target = roth_pct, None, None
+    if after_tax and cfg.contributions.after_tax_enabled:
         wanted = rc.target_total_additions
         cap = additions_cap(cfg, fed)
         total_target = None if wanted == "none" else cap if wanted == "max" else float(wanted)

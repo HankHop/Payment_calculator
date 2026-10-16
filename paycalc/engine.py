@@ -57,6 +57,11 @@ def analyze(cfg: Config) -> Analysis:
     recommended = _scenario("Recommended", cfg, events, fed, st, rec.plan)
 
     warnings: List[str] = []
+    if not cfg.contributions.after_tax_enabled:
+        warnings.append(
+            "After-tax contributions are hidden and ignored. They only make sense if your plan allows "
+            "an in-plan Roth conversion or in-service rollover to a Roth IRA (mega backdoor Roth). "
+            "Set contributions.acknowledge_mega_backdoor to true to include them.")
     res = current.result
     last_regular = max(e.pay_date for e in events if e.kind == "regular")
     if res.limit_reached_on and res.limit_reached_on < last_regular:

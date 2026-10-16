@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from paycalc import config, data, taxes
+from paycalc import config, data, report, taxes
 from paycalc.engine import analyze
 from paycalc.schedule import build_events, pay_dates
 from paycalc.simulate import make_plan, plan_from_config, simulate
@@ -236,7 +236,7 @@ def after_tax_cfg(**overrides):
     base = dict(
         state="TX",
         pay={"base_salary": 150000},
-        contributions={"posttax_type": "after_tax",
+        contributions={"posttax_type": "after_tax", "acknowledge_mega_backdoor": True,
                        "elections": [{"effective_date": "2026-01-02", "pretax_percent": 10, "posttax_percent": 0},
                                      {"effective_date": "2026-08-07", "pretax_percent": 10, "posttax_percent": 30}],
                        "employer": {"match_rate_percent": 50, "match_up_to_percent_of_pay": 6,
@@ -279,7 +279,7 @@ class TestAfterTax(unittest.TestCase):
         self.assertEqual(make_plan(cfg, FED, 0, 0).total_cap, 80000)
 
     def test_take_home_cap_limits_after_tax(self):
-        cfg = after_tax_cfg(contributions={"posttax_type": "after_tax", "elections": [
+        cfg = after_tax_cfg(contributions={"posttax_type": "after_tax", "acknowledge_mega_backdoor": True, "elections": [
             {"effective_date": "2026-01-02", "pretax_percent": 20, "posttax_percent": 80}]})
         a = analyze(cfg)
         # 100% of gross cannot be deducted; taxes still have to be paid.
@@ -334,6 +334,46 @@ class TestAfterTax(unittest.TestCase):
         cfg = cfg_from(contributions={"pretax_percent": 5, "posttax_percent": 5})
         self.assertEqual(len(cfg.contributions.elections), 1)
         self.assertEqual(cfg.contributions.posttax_type, "roth")
+
+
+class TestMegaBackdoorAcknowledgement(unittest.TestCase):
+    def _cfg(self, ack):
+        return after_tax_cfg(
+            as_of_date="2026-07-01",
+            contributions={"posttax_type": "after_tax", "acknowledge_mega_backdoor": ack,
+                           "elections": [{"effective_date": "2026-01-02", "pretax_percent": 10, "posttax_percent": 0},
+                                         {"effective_date": "2026-05-01", "pretax_percent": 10, "posttax_percent": 50}]})
+
+    def test_hidden_until_acknowledged(self):
+        a = analyze(self._cfg(False))
+        self.assertFalse(a.cfg.contributions.after_tax_enabled)
+        self.assertEqual(a.current.result.posttax, 0)
+        self.assertEqual(a.recommended.result.posttax, 0)
+        self.assertEqual(a.recommendation.posttax_percent, 0)
+        self.assertTrue(any("mega backdoor" in w for w in a.warnings))
+        text = report.text(a, schedule=True)
+        for hidden in ("After-tax percent", "After-tax contributions  ", "post-tax", "415(c)", "Total additions"):
+            self.assertNotIn(hidden, text)
+
+    def test_default_is_not_acknowledged(self):
+        cfg = after_tax_cfg(contributions={"posttax_type": "after_tax"})
+        self.assertFalse(cfg.contributions.after_tax_enabled)
+
+    def test_shown_when_acknowledged(self):
+        a = analyze(self._cfg(True))
+        self.assertTrue(a.cfg.contributions.after_tax_enabled)
+        self.assertGreater(a.current.result.posttax, 0)
+        self.assertGreater(a.recommended.result.posttax, 0)
+        self.assertFalse(any("mega backdoor" in w for w in a.warnings))
+        self.assertIn("After-tax percent", report.text(a))
+
+    def test_roth_mode_unaffected(self):
+        cfg = cfg_from(contributions={"pretax_percent": 5, "posttax_percent": 5})
+        self.assertTrue(cfg.contributions.after_tax_enabled)
+
+    def test_non_boolean_acknowledgement_rejected(self):
+        with self.assertRaises(config.ConfigError):
+            after_tax_cfg(contributions={"posttax_type": "after_tax", "acknowledge_mega_backdoor": "yes"})
 
 
 class TestConfigValidation(unittest.TestCase):

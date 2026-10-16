@@ -17,6 +17,7 @@ def _p(x: float) -> str:
 def _rows(a: Analysis):
     cur, rec = a.current, a.recommended
     post = "After-tax" if a.cfg.contributions.posttax_type == "after_tax" else "Roth"
+    show_post = a.cfg.contributions.after_tax_enabled
 
     def row(label, f, fmt=_m):
         return (label, fmt(f(cur)), fmt(f(rec)))
@@ -26,15 +27,15 @@ def _rows(a: Analysis):
         row("Gross pay", lambda s: s.result.gross),
         ("CONTRIBUTIONS", "", ""),
         row("Pretax percent (going forward)", lambda s: s.plan.pretax_percent, _p),
-        row(f"{post} percent (going forward)", lambda s: s.plan.posttax_percent, _p),
+        *([row(f"{post} percent (going forward)", lambda s: s.plan.posttax_percent, _p)] if show_post else []),
         row("Pretax contributions", lambda s: s.result.pretax),
-        row(f"{post} contributions", lambda s: s.result.posttax),
+        *([row(f"{post} contributions", lambda s: s.result.posttax)] if show_post else []),
         row("Employee total", lambda s: s.result.employee),
         row("Employer match", lambda s: s.result.match),
         row("Employer unmatched", lambda s: s.result.nonelective),
-        row("Total additions (415(c))", lambda s: s.result.total_additions),
+        *([row("Total additions (415(c))", lambda s: s.result.total_additions)] if show_post else []),
         row("Unused elective limit", lambda s: max(0.0, s.plan.employee_limit - s.result.elective)),
-        row("Unused 415(c) room", lambda s: max(0.0, s.plan.total_cap - s.result.total_additions)),
+        *([row("Unused 415(c) room", lambda s: max(0.0, s.plan.total_cap - s.result.total_additions))] if show_post else []),
         ("ESTIMATED TAXES", "", ""),
         row("Federal taxable income", lambda s: s.tax.federal_taxable),
         row("Federal income tax", lambda s: s.tax.federal),
@@ -64,8 +65,10 @@ def text(a: Analysis, schedule: bool = False) -> str:
                    f"match: {'yes' if cfg.contributions.employer.bonus_eligible_for_match else 'no'}, "
                    f"unmatched: {'yes' if cfg.contributions.employer.bonus_eligible_for_nonelective else 'no'}")
     pt = "after-tax" if cfg.contributions.posttax_type == "after_tax" else "Roth"
+    show_post = cfg.contributions.after_tax_enabled
     for el in cfg.contributions.elections:
-        out.append(f"Election from {el.effective_date}: pretax {_p(el.pretax_percent)}, {pt} {_p(el.posttax_percent)}")
+        extra = f", {pt} {_p(el.posttax_percent)}" if show_post else ""
+        out.append(f"Election from {el.effective_date}: pretax {_p(el.pretax_percent)}{extra}")
     if cfg.as_of_date:
         out.append(f"As of {cfg.as_of_date}: recommendation applies to later paychecks only")
     out.append("")
@@ -84,8 +87,9 @@ def text(a: Analysis, schedule: bool = False) -> str:
 
     rec = a.recommendation
     since = f" from the paycheck on {rec.effective_from}" if rec.effective_from else ""
-    out.append(f"Recommendation{since}: {_p(rec.pretax_percent)} pretax + {_p(rec.posttax_percent)} {pt} "
-               f"of eligible pay (elective target {_m(rec.target_dollars)}"
+    out.append(f"Recommendation{since}: {_p(rec.pretax_percent)} pretax"
+               + (f" + {_p(rec.posttax_percent)} {pt}" if show_post else "") +
+               f" of eligible pay (elective target {_m(rec.target_dollars)}"
                + (f"; retirement marginal rate assumed {cfg.recommendation.expected_retirement_marginal_rate_percent:g}%"
                   if cfg.contributions.posttax_type == "roth" else "") + ").")
     if rec.result.limit_reached_on:
@@ -100,10 +104,12 @@ def text(a: Analysis, schedule: bool = False) -> str:
         for sc in (a.current, a.recommended):
             out.append("")
             out.append(f"{sc.label} - by pay date")
-            out.append(f"  {'date':<12}{'type':<9}{'gross':>12}{'pretax':>11}{'post-tax':>11}{'match':>10}{'unmatched':>11}")
+            post_h = f"{'post-tax':>11}" if show_post else ""
+            out.append(f"  {'date':<12}{'type':<9}{'gross':>12}{'pretax':>11}{post_h}{'match':>10}{'unmatched':>11}")
             for r in sc.result.rows:
+                post_c = f"{r.posttax:>11,.2f}" if show_post else ""
                 out.append(f"  {str(r.pay_date):<12}{r.kind:<9}{r.gross:>12,.2f}{r.pretax:>11,.2f}"
-                           f"{r.posttax:>11,.2f}{r.match:>10,.2f}{r.nonelective:>11,.2f}")
+                           f"{post_c}{r.match:>10,.2f}{r.nonelective:>11,.2f}")
     return "\n".join(out)
 
 

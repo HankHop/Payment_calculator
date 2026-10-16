@@ -48,6 +48,8 @@ class Election:
 @dataclass(frozen=True)
 class Contributions:
     elections: tuple                       # tuple[Election, ...], sorted by effective_date
+    after_tax_enabled: bool                # False while posttax_type is "after_tax" and the
+                                           # mega backdoor acknowledgement is not set
     posttax_type: str                      # "roth" (elective, shares the deferral limit) or
                                            # "after_tax" (non-Roth; counts only toward the 415(c) limit)
     bonus_eligible_for_employee_contributions: bool
@@ -164,12 +166,18 @@ def parse(raw: dict) -> Config:
             raise ConfigError(f"{f}: pretax_percent + posttax_percent exceeds 100")
         elections.append(Election(_in_year(_date(el.get("effective_date"), f"{f}.effective_date"),
                                            year, f"{f}.effective_date"), pre, post))
-    elections.sort(key=lambda x: x.effective_date)
-    if len({e.effective_date for e in elections}) != len(elections):
-        raise ConfigError("contributions.elections: two elections share an effective_date")
     posttax_type = c.get("posttax_type", "roth")
     if posttax_type not in ("roth", "after_tax"):
         raise ConfigError("contributions.posttax_type: 'roth' or 'after_tax'")
+    ack = c.get("acknowledge_mega_backdoor", False)
+    if not isinstance(ack, bool):
+        raise ConfigError("contributions.acknowledge_mega_backdoor: true or false")
+    after_tax_enabled = posttax_type != "after_tax" or ack
+    if not after_tax_enabled:  # hidden: after-tax elections are ignored entirely
+        elections = [Election(e.effective_date, e.pretax_percent, 0.0) for e in elections]
+    elections.sort(key=lambda x: x.effective_date)
+    if len({e.effective_date for e in elections}) != len(elections):
+        raise ConfigError("contributions.elections: two elections share an effective_date")
     employer = Employer(
         match_rate_percent=_pct(e.get("match_rate_percent", 0), "employer.match_rate_percent", 0, 1000),
         match_up_to_percent_of_pay=_pct(e.get("match_up_to_percent_of_pay", 0), "employer.match_up_to_percent_of_pay"),
@@ -178,7 +186,7 @@ def parse(raw: dict) -> Config:
         bonus_eligible_for_nonelective=bool(e.get("bonus_eligible_for_nonelective", False)),
     )
     contributions = Contributions(
-        tuple(elections), posttax_type, bool(c.get("bonus_eligible_for_employee_contributions", False)), employer)
+        tuple(elections), after_tax_enabled, posttax_type, bool(c.get("bonus_eligible_for_employee_contributions", False)), employer)
 
     rec = raw.get("recommendation") or {}
     target = rec.get("target_employee_contribution", "max")

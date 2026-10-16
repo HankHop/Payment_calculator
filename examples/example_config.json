@@ -15,6 +15,7 @@
 
   "contributions": {
     "posttax_type": "after_tax",
+    "acknowledge_mega_backdoor": false,
     "elections": [
       {"effective_date": "2026-01-09", "pretax_percent": 20, "posttax_percent": 0},
       {"effective_date": "2026-08-07", "pretax_percent": 20, "posttax_percent": 80}

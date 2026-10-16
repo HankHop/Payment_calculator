@@ -25,6 +25,7 @@ python -m unittest discover -s tests            # tests
 | `pay.bonus` | `pay_date` plus `amount` or `percent_of_salary` (of the salary in effect that day). Modeled as its own paycheck |
 | `contributions.elections` | List of `{effective_date, pretax_percent, posttax_percent}`. Each applies to pay dates on or after its date, so a mid-year change is two entries. A single `pretax_percent`/`posttax_percent` pair (no list) applies all year |
 | `contributions.posttax_type` | `after_tax` = non-Roth after-tax money (counts toward the 415(c) total limit, not the 24,500 deferral limit; mega-backdoor style). `roth` (default) = Roth 401(k), shares the deferral limit with pretax |
+| `contributions.acknowledge_mega_backdoor` | Default `false`. While `posttax_type` is `after_tax` and this is false, all after-tax figures are hidden and after-tax elections are ignored. Set to `true` only if your plan allows an in-plan Roth conversion or in-service rollover to a Roth IRA |
 | `as_of_date` | Optional. Paychecks on or before it keep your actual elections; the recommendation applies to later paychecks only. Leave it out to plan the whole year from the first paycheck |
 | `contributions.bonus_eligible_for_employee_contributions` | Whether your % is taken from the bonus |
 | `employer.match_rate_percent`, `match_up_to_percent_of_pay` | e.g. 50 and 6 = 50% of your first 6% |
