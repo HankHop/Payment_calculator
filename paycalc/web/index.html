@@ -168,8 +168,8 @@ function sel(p, label, opts, t = "str", rerender = false) {
   const o = opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
   return `<label>${label}<select data-p="${p}" data-t="${t}" ${rerender ? "data-re=1" : ""}>${o}</select></label>`;
 }
-function tri(p, label) {
-  return sel(p, label, [["", "Use my default"], ["true", "Yes"], ["false", "No"]], "tri");
+function tri(p, label, hint = "") {
+  return sel(p, label, [["", "Use my default"], ["true", "Yes"], ["false", "No"]], "tri") + (hint ? `<div class="hint">${hint}</div>` : "");
 }
 function chk(p, label, rerender = false) {
   return `<label class="check"><input type="checkbox" data-p="${p}" data-t="bool" ${rerender ? "data-re=1" : ""} ${getPath(S, p) ? "checked" : ""}><span>${label}</span></label>`;
@@ -214,7 +214,7 @@ function renderForm() {
         ${txt(`pay.bonuses.${i}.pay_date`, "Pay date", "date")}
         <label>Amount as<select data-act="bonus-mode" data-i="${i}"><option value="amount" ${mode==="amount"?"selected":""}>Dollars</option><option value="percent_of_salary" ${mode==="percent_of_salary"?"selected":""}>% of salary</option></select></label>
         ${num(`pay.bonuses.${i}.${mode}`, mode === "amount" ? "Dollars" : "% of salary")}
-        ${tri(`pay.bonuses.${i}.eligible_for_employee_contributions`, "401(k) taken from it?")}
+        ${tri(`pay.bonuses.${i}.eligible_for_employee_contributions`, "My 401(k) % applied to it?", "No = percentages use base pay only. Its cash still counts as take-home, so it can cover the election on that paycheck.")}
         ${tri(`pay.bonuses.${i}.eligible_for_match`, "Employer match on it?")}
         ${tri(`pay.bonuses.${i}.eligible_for_nonelective`, "Employer unmatched on it?")}
       </div>
@@ -239,7 +239,7 @@ function renderForm() {
   });
   h += `<button data-act="add-election">+ Add an election change</button>
     <div class="hint">Each election applies from its date onward. Elections re-order themselves by date when you change a date, so you can add one for an earlier date. Percentages are of eligible pay; elections near 100% take whatever is left after taxes, HSA, premiums and pretax.</div>
-    ${chk("contributions.bonus_eligible_for_employee_contributions", "Default: bonuses have my 401(k) % taken from them")}
+    ${chk("contributions.bonus_eligible_for_employee_contributions", "Default: my 401(k) % is applied to bonuses (unchecked = base pay only; bonus cash still counts as take-home)")}
   </div>`;
 
   h += `<div class="card"><h2>Employer</h2><div class="grid2">
