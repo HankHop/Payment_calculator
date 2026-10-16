@@ -50,8 +50,14 @@ def _rows(a: Analysis):
         row("Effective tax rate", lambda s: s.tax.total / s.result.gross * 100, lambda v: f"{v:.2f}%"),
         row("Marginal rate (fed + state)", lambda s: (s.tax.marginal_federal + s.tax.marginal_state) * 100,
             lambda v: f"{v:.2f}%"),
+        ("WITHHOLDING (what payroll takes from each paycheck)", "", ""),
+        row("Federal income tax withheld", lambda s: s.fed_withheld),
+        *([row("  of which W-4 extra withholding", lambda s: s.extra_withheld)] if cur.extra_withheld else []),
+        row("Projected federal refund (+) / owed (-)", lambda s: s.fed_balance),
+        row("All taxes withheld (fed, FICA, state)", lambda s: s.withheld_total),
         ("TAKE-HOME", "", ""),
-        row("Net pay for the year", lambda s: s.net_pay),
+        row("Net pay for the year (paychecks)", lambda s: s.net_pay),
+        row("Net pay once the year's tax is settled", lambda s: s.net_pay_settled),
     ]
 
 
@@ -94,17 +100,16 @@ def _election_lines(sc: Scenario, label: str) -> List[str]:
 
 def monthly(sc: Scenario, expenses=None) -> list:
     """Per calendar month (by pay date): where each paycheck goes and what lands in the bank.
-    Taxes are allocated by gross at the year's average rate; the tax saved by pretax 401(k) is
-    allocated by each month's share of pretax contributions."""
+    Taxes are what payroll withholds from each paycheck (bonus paychecks included); the tax saved by
+    pretax 401(k) is allocated by each month's share of pretax contributions."""
     r = sc.result
-    rate = sc.tax.total / r.gross if r.gross else 0.0
     saved_total = max(0.0, sc.tax_without_pretax - sc.tax.total)
     out = {}
     for x in r.rows:
         m = out.setdefault(x.pay_date.month, dict(month=x.pay_date.month, gross=0.0, taxes=0.0, other=0.0,
                                                  pretax=0.0, posttax=0.0, tax_saved=0.0))
         m["gross"] += x.gross
-        m["taxes"] += rate * x.gross
+        m["taxes"] += x.withheld
         m["other"] += x.hsa + x.other_pretax + x.other_posttax
         m["pretax"] += x.pretax
         m["posttax"] += x.posttax
@@ -227,7 +232,7 @@ def as_dict(a: Analysis) -> dict:
             "federal_taxable_income": round(t.federal_taxable, 2),
             "federal_tax": round(t.federal, 2), "state_tax": round(t.state, 2),
             "social_security": round(t.social_security, 2), "medicare": round(t.medicare, 2),
-            "total_taxes": round(t.total, 2), "net_pay": round(s.net_pay, 2),
+            "total_taxes": round(t.total, 2), "net_pay": round(s.net_pay, 2), "net_pay_settled": round(s.net_pay_settled, 2),
             "limit_reached_on": str(r.limit_reached_on) if r.limit_reached_on else None,
             "monthly": [{k: (round(v, 2) if k != "month" else v) for k, v in m.items()}
                         for m in monthly(s, cfg.monthly_expenses)],
@@ -239,8 +244,12 @@ def as_dict(a: Analysis) -> dict:
                  "pretax": round(x.pretax, 2), "posttax": round(x.posttax, 2),
                  "match": round(x.match, 2), "unmatched": round(x.nonelective, 2),
                  "hsa": round(x.hsa, 2), "other_pretax": round(x.other_pretax, 2),
-                 "other_posttax": round(x.other_posttax, 2)}
+                 "other_posttax": round(x.other_posttax, 2),
+                 "withheld": round(x.withheld, 2), "fed_withheld": round(x.fed_withheld, 2),
+                 "extra_withheld": round(x.extra_withheld, 2)}
                 for x in r.rows],
+            "fed_withheld": round(s.fed_withheld, 2), "extra_withheld": round(s.extra_withheld, 2),
+            "withheld_total": round(s.withheld_total, 2), "fed_balance": round(s.fed_balance, 2),
         }
 
     rec = a.recommendation

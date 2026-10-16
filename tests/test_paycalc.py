@@ -444,7 +444,7 @@ class TestRealLifeDeductions(unittest.TestCase):
     def test_net_pay_subtracts_all_deductions(self):
         a = analyze(bonus_month_cfg())
         r, t = a.current.result, a.current.tax
-        self.assertAlmostEqual(a.current.net_pay,
+        self.assertAlmostEqual(a.current.net_pay_settled,
                                r.gross - r.employee - r.hsa - r.other_pretax - r.other_posttax - t.total)
         self.assertAlmostEqual(r.hsa, 150 * 26)
 
@@ -554,7 +554,7 @@ class TestMonthlyCashFlow(unittest.TestCase):
         self.assertAlmostEqual(sum(x["net"] for x in m), a.current.net_pay, places=2)
         self.assertAlmostEqual(sum(x["pretax"] for x in m), r.pretax, places=2)
         self.assertAlmostEqual(sum(x["posttax"] for x in m), r.posttax, places=2)
-        self.assertAlmostEqual(sum(x["taxes"] for x in m), a.current.tax.total, places=2)
+        self.assertAlmostEqual(sum(x["taxes"] for x in m), a.current.withheld_total, places=2)
 
     def test_pretax_costs_less_than_face_value(self):
         a = analyze(bonus_month_cfg())

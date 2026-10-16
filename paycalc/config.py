@@ -81,6 +81,21 @@ class Deductions:
 
 
 @dataclass(frozen=True)
+class WithholdingChange:
+    """W-4 settings in force for pay dates on or after effective_date."""
+    effective_date: date
+    regular_federal_per_paycheck: Optional[float]   # None = estimate from brackets
+    extra_federal_per_paycheck: float               # W-4 step 4(c) extra withholding
+    multiple_jobs: bool = False                     # W-4 step 2(c) box: "multiple jobs / spouse works"
+
+
+@dataclass(frozen=True)
+class Withholding:
+    supplemental_rate_percent: float = 22.0         # flat federal rate on bonus pay (37% above $1M)
+    changes: tuple = ()                             # tuple[WithholdingChange, ...], sorted by date
+
+
+@dataclass(frozen=True)
 class Config:
     tax_year: int
     filing_status: str
@@ -96,6 +111,7 @@ class Config:
     recommendation: Recommendation
     deductions: Deductions
     monthly_expenses: Optional[float] = None   # optional: living costs paid from take-home
+    withholding: Withholding = Withholding()
 
 
 def _date(value, field) -> date:
@@ -109,6 +125,12 @@ def _pct(value, field, lo=0.0, hi=100.0) -> float:
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not lo <= value <= hi:
         raise ConfigError(f"{field}: expected a number between {lo} and {hi}, got {value!r}")
     return float(value)
+
+
+def _bool(value, field) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{field}: true or false")
+    return value
 
 
 def _in_year(d: date, year: int, field: str) -> date:
@@ -244,10 +266,27 @@ def parse(raw: dict) -> Config:
         _pct(d.get("other_pretax_per_paycheck", 0), "deductions.other_pretax_per_paycheck", 0, 1e7),
         _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7))
 
+    w = raw.get("withholding") or {}
+    changes = []
+    for i, ch in enumerate(w.get("changes") or []):
+        f = f"withholding.changes[{i}]"
+        reg = ch.get("regular_federal_per_paycheck")
+        changes.append(WithholdingChange(
+            _in_year(_date(ch.get("effective_date"), f"{f}.effective_date"), year, f"{f}.effective_date"),
+            None if reg is None else _pct(reg, f"{f}.regular_federal_per_paycheck", 0, 1e7),
+            _pct(ch.get("extra_federal_per_paycheck", 0), f"{f}.extra_federal_per_paycheck", 0, 1e7),
+            _bool(ch.get("multiple_jobs", False), f"{f}.multiple_jobs")))
+    changes.sort(key=lambda x: x.effective_date)
+    if len({c_.effective_date for c_ in changes}) != len(changes):
+        raise ConfigError("withholding.changes: two changes share an effective_date")
+    withholding = Withholding(_pct(w.get("supplemental_rate_percent", 22), "withholding.supplemental_rate_percent"),
+                              tuple(changes))
+
     return Config(year, status, state, age, as_of, float(salary), freq, first_pay, raise_, tuple(bonuses),
                   contributions, recommendation, deductions,
                   None if raw.get("monthly_expenses") is None
-                  else _pct(raw["monthly_expenses"], "monthly_expenses", 0, 1e9))
+                  else _pct(raw["monthly_expenses"], "monthly_expenses", 0, 1e9),
+                  withholding)
 
 
 def load(path) -> Config:

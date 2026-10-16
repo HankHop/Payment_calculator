@@ -27,6 +27,7 @@ from typing import List, Optional, Sequence
 from . import taxes
 from .config import Config
 from .schedule import PayEvent
+from .withholding import Withholder
 from .simulate import (Plan, YearResult, employee_limit, additions_cap, plan_from_elections,
                        simulate)
 
@@ -93,8 +94,8 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
     remaining = [ev for ev in events if as_of is None or ev.pay_date > as_of]
     start = remaining[0].pay_date if remaining else None
 
-    def plan_with(pre: float, post: float, rate: Optional[float] = None) -> Plan:
-        return plan_from_elections(cfg, fed, locked + (((start, pre, post),) if start else ()), rate)
+    def plan_with(pre: float, post: float, wh=None) -> Plan:
+        return plan_from_elections(cfg, fed, locked + (((start, pre, post),) if start else ()), wh)
 
     # Elective target
     limit = employee_limit(cfg, fed)
@@ -150,7 +151,7 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
         pre_pct = min(_round_to(rem_pre / rem_comp * 100, step), elective_pct)
         roth_pct = round(elective_pct - pre_pct, 6)
 
-    post_pct, rate, total_target = roth_pct, None, None
+    post_pct, wh, total_target = roth_pct, None, None
     if after_tax and cfg.contributions.after_tax_enabled:
         wanted = rc.target_total_additions
         cap = additions_cap(cfg, fed)
@@ -164,16 +165,17 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
             sim0 = simulate(events, plan_with(pre_pct, 0.0))
             tax = taxes.summarize(sim0.gross, sim0.pretax, cfg.filing_status, fed, st,
                                   hsa_total, other_pretax_total)
-            rate = tax.total / sim0.gross if sim0.gross else 0.0
-            sim1 = simulate(events, plan_with(pre_pct, 0.0, rate))
+            wh = Withholder(cfg, fed, st, events, tax.state / sim0.gross if sim0.gross else 0.0)
+            sim1 = simulate(events, plan_with(pre_pct, 0.0, wh))
             need_post = max(0.0, total_target - sim1.total_additions)
             wanted_pct = _floor_to(need_post / rem_comp * 100, step)
             # What take-home pay can cover, per remaining paycheck, after taxes, HSA, premiums
             # and other post-tax deductions
             feasible = min(
-                ((ev.gross * (1 - rate) - ev.hsa - ev.other_pretax - ev.other_posttax
-                  - pre_pct / 100 * ev.deferral_comp) / ev.deferral_comp * 100
-                 for ev in remaining if ev.deferral_comp > 0), default=0.0)
+                ((ev.gross - wh.total(i, ev, pre_pct / 100 * ev.deferral_comp) - ev.hsa - ev.other_pretax
+                  - ev.other_posttax - pre_pct / 100 * ev.deferral_comp) / ev.deferral_comp * 100
+                 for i, ev in enumerate(events)
+                 if (as_of is None or ev.pay_date > as_of) and ev.deferral_comp > 0), default=0.0)
             feasible = _floor_to(max(0.0, feasible), step)
             post_pct = min(wanted_pct, feasible, rc.plan_max_percent, 100 - pre_pct)
             if post_pct < wanted_pct - 1e-9:
@@ -184,7 +186,7 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
         else:
             post_pct = 0.0
 
-    plan = plan_with(pre_pct, post_pct, rate)
+    plan = plan_with(pre_pct, post_pct, wh)
     result = simulate(events, plan)
 
     if after_tax and total_target is not None:

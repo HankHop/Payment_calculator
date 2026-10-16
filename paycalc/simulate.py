@@ -6,7 +6,7 @@ Limits modeled
   The 415(c) cap is enforced on post-tax contributions when posttax_type == "after_tax".
 - 401(a)(17) compensation limit on pay the percentages apply to.
 - Optional take-home cap: post-tax contributions cannot exceed pay left after estimated taxes,
-  HSA, premiums, other post-tax deductions and pretax 401(k) (take_home_rate = all-in tax / gross).
+  HSA, premiums, other post-tax deductions and pretax 401(k) (taxes as withheld, see withholding.py).
   An election of 100% therefore contributes whatever is left, as payroll does.
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ class Plan:
     employee_limit: float         # elective deferral limit incl. catch-up
     total_cap: float              # 415(c) limit incl. catch-up
     comp_limit: float             # 401(a)(17)
-    take_home_rate: Optional[float] = None
+    withholder: Optional[object] = None   # Withholder: taxes withheld per paycheck (take-home cap)
 
     def percents_on(self, d: date) -> Tuple[float, float]:
         pre = post = 0.0
@@ -64,6 +64,9 @@ class EventRow:
     posttax_requested: float = 0.0              # what the election asks for on this paycheck
     posttax_available: Optional[float] = None   # pay left for it after taxes and deductions
     label: str = ""                             # bonus name(s) paid in this paycheck
+    withheld: float = 0.0                       # taxes withheld from this paycheck (cash)
+    fed_withheld: float = 0.0
+    extra_withheld: float = 0.0                 # W-4 extra withholding included in fed_withheld
 
 
 @dataclass
@@ -133,12 +136,12 @@ def plan_from_config(cfg: Config, fed: dict) -> Plan:
 
 
 def plan_from_elections(cfg: Config, fed: dict, elections: Sequence[Election],
-                        take_home_rate: Optional[float] = None) -> Plan:
+                        withholder=None) -> Plan:
     e = cfg.contributions.employer
     return Plan(tuple(elections), cfg.contributions.posttax_type, e.match_rate_percent / 100,
                 e.match_up_to_percent_of_pay, e.nonelective_percent,
                 employee_limit(cfg, fed), additions_cap(cfg, fed),
-                float(fed["retirement"]["compensation_limit_401a17"]), take_home_rate)
+                float(fed["retirement"]["compensation_limit_401a17"]), withholder)
 
 
 def eligible_deferral_comp(events: Sequence[PayEvent], comp_limit: float) -> float:
@@ -156,7 +159,7 @@ def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
     cum_def_comp = cum_match_comp = cum_ne_comp = 0.0
     cum_elective = cum_total = 0.0
 
-    for ev in events:
+    for i, ev in enumerate(events):
         pre_pct, post_pct = plan.percents_on(ev.pay_date)
         def_comp = max(0.0, min(ev.deferral_comp, plan.comp_limit - cum_def_comp))
         match_comp = max(0.0, min(ev.match_comp, plan.comp_limit - cum_match_comp))
@@ -177,8 +180,8 @@ def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
         # Take-home cap: post-tax money can only come from pay left after estimated taxes,
         # HSA, premiums, other post-tax deductions and the pretax 401(k).
         requested, available = post, None
-        if plan.take_home_rate is not None:
-            available = max(0.0, ev.gross * (1 - plan.take_home_rate)
+        if plan.withholder is not None:
+            available = max(0.0, ev.gross - plan.withholder.total(i, ev, pre)
                             - ev.hsa - ev.other_pretax - ev.other_posttax - pre)
             post = min(post, available)
 
@@ -202,7 +205,10 @@ def simulate(events: Sequence[PayEvent], plan: Plan) -> YearResult:
         if result.total_cap_reached_on is None and cum_total >= plan.total_cap - 0.005:
             result.total_cap_reached_on = ev.pay_date
 
-        result.rows.append(EventRow(ev.pay_date, ev.kind, ev.gross, pre, post, match, nonelective,
-                                    ev.hsa, ev.other_pretax, ev.other_posttax, requested, available,
-                                    ev.bonus_label))
+        wh = plan.withholder.parts(i, ev, pre) if plan.withholder is not None else None
+        result.rows.append(EventRow(
+            ev.pay_date, ev.kind, ev.gross, pre, post, match, nonelective,
+            ev.hsa, ev.other_pretax, ev.other_posttax, requested, available, ev.bonus_label,
+            withheld=(wh["federal"] + wh["social_security"] + wh["medicare"] + wh["state"]) if wh else 0.0,
+            fed_withheld=wh["federal"] if wh else 0.0, extra_withheld=wh["extra"] if wh else 0.0))
     return result

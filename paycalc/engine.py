@@ -8,6 +8,7 @@ from . import data, taxes
 from .config import Config
 from .recommend import Recommendation, recommend
 from .schedule import PayEvent, build_events
+from .withholding import Withholder
 from .simulate import Plan, YearResult, additions_cap, plan_from_config, simulate
 
 
@@ -21,9 +22,33 @@ class Scenario:
     tax_without_pretax: float = 0.0  # total tax if no pretax 401(k) were deducted
 
     @property
+    def withheld_total(self) -> float:
+        return sum(r.withheld for r in self.result.rows)
+
+    @property
+    def fed_withheld(self) -> float:
+        return sum(r.fed_withheld for r in self.result.rows)
+
+    @property
+    def extra_withheld(self) -> float:
+        return sum(r.extra_withheld for r in self.result.rows)
+
+    @property
+    def fed_balance(self) -> float:
+        """Federal withheld minus federal liability: positive is a refund, negative is tax owed."""
+        return self.fed_withheld - self.tax.federal
+
+    @property
     def net_pay(self) -> float:
+        """Take-home actually paid out over the year: after what payroll withheld."""
         r = self.result
-        return (r.gross - r.employee - r.hsa - r.other_pretax - r.other_posttax - self.tax.total)
+        return r.gross - r.employee - r.hsa - r.other_pretax - r.other_posttax - self.withheld_total
+
+    @property
+    def net_pay_settled(self) -> float:
+        """Take-home once the year's tax is settled (liability instead of withholding)."""
+        r = self.result
+        return r.gross - r.employee - r.hsa - r.other_pretax - r.other_posttax - self.tax.total
 
 
 @dataclass
@@ -48,8 +73,9 @@ def _scenario(label, cfg, events, fed, st, plan) -> Scenario:
     result = simulate(events, plan)
     tax = taxed(result)
     uncapped = result.posttax
-    if plan.take_home_rate is None:
-        plan = replace(plan, take_home_rate=tax.total / result.gross)
+    if plan.withholder is None:
+        plan = replace(plan, withholder=Withholder(cfg, fed, st, events,
+                                                   tax.state / result.gross if result.gross else 0.0))
         result = simulate(events, plan)
     no_pretax = taxes.summarize(result.gross, 0.0, cfg.filing_status, fed, st,
                                 result.hsa, result.other_pretax).total

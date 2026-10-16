@@ -128,13 +128,17 @@ function ensure() {
   sortElections();
   S.contributions.employer = S.contributions.employer || {};
   S.deductions = S.deductions || {};
+  S.withholding = S.withholding || {};
+  S.withholding.changes = S.withholding.changes || [];
+  sortByDate(S.withholding.changes);
   S.recommendation = S.recommendation || {};
 }
-function sortElections() {
-  // Oldest first; elections without a date yet stay at the end. Array.sort is stable.
+function sortByDate(list) {
+  // Oldest first; entries without a date yet stay at the end. Array.sort is stable.
   const key = (e) => e.effective_date || "9999-12-31";
-  S.contributions.elections.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  list.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
 }
+function sortElections() { sortByDate(S.contributions.elections); }
 function clean(v) {
   if (Array.isArray(v)) return v.map(clean);
   if (v && typeof v === "object") {
@@ -253,6 +257,21 @@ function renderForm() {
     ${num("deductions.other_posttax_per_paycheck", "Other post-tax")}
   </div></div>`;
 
+  h += `<div class="card"><h2>Tax withholding (W-4)</h2>
+    <div class="hint" style="margin:0 0 8px">What payroll takes from each paycheck. Bonuses are withheld at a flat rate; the year's actual tax is still calculated separately and compared to what is withheld.</div>
+    ${num("withholding.supplemental_rate_percent", "Bonus federal withholding %", "Leave empty for 22%")}`;
+  (S.withholding.changes).forEach((w, i) => {
+    h += `<div class="item"><div class="head"><span>W-4 setting ${i + 1}</span><button class="link danger" data-act="del-w4" data-i="${i}">Remove</button></div>
+      <div class="grid2">
+        ${txt(`withholding.changes.${i}.effective_date`, "Takes effect on pay date", "date")}
+        ${num(`withholding.changes.${i}.extra_federal_per_paycheck`, "Extra withholding per paycheck", "W-4 step 4(c)")}
+        ${num(`withholding.changes.${i}.regular_federal_per_paycheck`, "Regular federal withholding per paycheck", "Leave empty to estimate")}
+      </div>
+      ${chk(`withholding.changes.${i}.multiple_jobs`, "W-4 step 2 box: multiple jobs / spouse works")}</div>`;
+  });
+  h += `<button data-act="add-w4">+ Add a W-4 change</button>
+    <div class="hint">Each setting applies from its date onward. Add one dated at the start of the year for your original W-4, then another when you updated it.</div></div>`;
+
   h += `<div class="card"><h2>Recommendation settings</h2><div class="grid2">
     ${txt("recommendation.target_employee_contribution", "Pretax/Roth target ($ or max)", "text", "maxnum")}
     ${afterTax && ack ? txt("recommendation.target_total_additions", "Total target ($, max or none)", "text", "maxnum") : ""}
@@ -292,6 +311,7 @@ function onEdit(ev) {
   }
   setPath(S, p, convert(el));
   if (ev.type === "change" && /^contributions\.elections\.\d+\.effective_date$/.test(p)) { sortElections(); renderForm(); }
+  else if (ev.type === "change" && /^withholding\.changes\.\d+\.effective_date$/.test(p)) { sortByDate(S.withholding.changes); renderForm(); }
   else if (ev.type === "change" && el.dataset.re) renderForm();
   schedule();
 }
@@ -303,6 +323,8 @@ document.addEventListener("click", (ev) => {
   else if (a === "add-election") { const e = S.contributions.elections; const last = e[e.length - 1] || {};
     e.push({effective_date: "", pretax_percent: last.pretax_percent ?? 0, posttax_percent: last.posttax_percent ?? 0}); }
   else if (a === "del-election") S.contributions.elections.splice(i, 1);
+  else if (a === "add-w4") S.withholding.changes.push({effective_date: "", extra_federal_per_paycheck: 0, multiple_jobs: false});
+  else if (a === "del-w4") S.withholding.changes.splice(i, 1);
   else return;
   renderForm(); schedule();
 });
@@ -340,6 +362,7 @@ function resultsHTML() {
   h += `<div class="stats">
     <div class="stat"><div class="k">Recommended elections</div><div class="v">${recText}</div><div class="s">${R.effective_from ? "from the paycheck on " + R.effective_from : ""}</div></div>
     <div class="stat"><div class="k">Taxes (year)</div><div class="v">${money(rec.total_taxes, 0)}</div><div class="s">Current ${money(cur.total_taxes, 0)}</div></div>
+    <div class="stat"><div class="k">${cur.fed_balance >= 0 ? "Projected federal refund" : "Projected federal tax owed"} (your pay only)</div><div class="v">${money(Math.abs(cur.fed_balance), 0)}</div><div class="s">Federal withheld ${money(cur.fed_withheld, 0)} vs tax ${money(cur.fed_withheld - cur.fed_balance, 0)}${cur.extra_withheld ? " · extra withholding " + money(cur.extra_withheld, 0) : ""}</div></div>
     <div class="stat"><div class="k">Net pay (year)</div><div class="v">${money(rec.net_pay, 0)}</div><div class="s">Current ${money(cur.net_pay, 0)}</div></div>
     <div class="stat"><div class="k">Into 401(k), incl. employer</div><div class="v">${money(rec.total_additions, 0)}</div><div class="s">Current ${money(cur.total_additions, 0)}</div></div>
   </div>`;
@@ -376,9 +399,9 @@ function resultsHTML() {
     `<div class="foot">* Cost = how much take-home drops because of the contribution. Pretax costs less than its face amount because it lowers taxes${m.after_tax_enabled ? "; post-tax costs its full amount" : ""}. Net pay of $0 is shown in red.${m.monthly_expenses != null ? ` From savings = monthly expenses (${money(m.monthly_expenses, 0)}) minus net pay when net pay falls short.` : ""}</div>`;
 
   h += `<details style="margin-top:14px"><summary>Every paycheck</summary>` + table(
-    ["Date", "Type", "Gross", "Pretax", ...(m.after_tax_enabled ? ["Post-tax"] : []), "Match", "Unmatched", "HSA", "Premiums", "Other post-tax"],
-    sc.paychecks.map((r) => `<tr><td>${esc(r.date)}</td><td>${esc(r.kind === "regular" ? "regular" : r.kind + (r.label ? " (" + r.label + ")" : ""))}</td><td>${money(r.gross)}</td><td>${money(r.pretax)}</td>${m.after_tax_enabled ? `<td>${money(r.posttax)}</td>` : ""}<td>${money(r.match)}</td><td>${money(r.unmatched)}</td><td>${money(r.hsa)}</td><td>${money(r.other_pretax)}</td><td>${money(r.other_posttax)}</td></tr>`).join("")) + `</details></div>`;
-  h += `<div class="foot">Estimates only: salary alone, no spouse income, credits, local taxes or itemized deductions. Net pay uses your year's average tax rate, so a bonus paycheck's real withholding will differ.</div>`;
+    ["Date", "Type", "Gross", "Pretax", ...(m.after_tax_enabled ? ["Post-tax"] : []), "Match", "Unmatched", "HSA", "Premiums", "Other post-tax", "Taxes withheld", "of which federal"],
+    sc.paychecks.map((r) => `<tr><td>${esc(r.date)}</td><td>${esc(r.kind === "regular" ? "regular" : r.kind + (r.label ? " (" + r.label + ")" : ""))}</td><td>${money(r.gross)}</td><td>${money(r.pretax)}</td>${m.after_tax_enabled ? `<td>${money(r.posttax)}</td>` : ""}<td>${money(r.match)}</td><td>${money(r.unmatched)}</td><td>${money(r.hsa)}</td><td>${money(r.other_pretax)}</td><td>${money(r.other_posttax)}</td><td>${money(r.withheld)}</td><td>${money(r.fed_withheld)}</td></tr>`).join("")) + `</details></div>`;
+  h += `<div class="foot">Estimates only: salary alone, no spouse income, credits, local taxes or itemized deductions. Net pay uses estimated payroll withholding per paycheck; regular federal withholding is an estimate unless you enter it.</div>`;
   return h;
 }
 function renderResults() {

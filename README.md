@@ -48,6 +48,8 @@ python -m unittest discover -s tests            # tests (includes the GUI server
 | `employer.match_rate_percent`, `match_up_to_percent_of_pay` | e.g. 50 and 6 = 50% of your first 6% |
 | `employer.nonelective_percent` | Unmatched employer contribution, % of eligible pay |
 | `employer.bonus_eligible_for_match`, `bonus_eligible_for_nonelective` | Whether those are paid on the bonus |
+| `withholding.supplemental_rate_percent` | Flat federal withholding on bonus pay (default 22; 37% applies above $1M of bonuses) |
+| `withholding.changes` | List of W-4 settings, each from its `effective_date` onward: `multiple_jobs` (step 2 box), `extra_federal_per_paycheck` (step 4(c)), optional `regular_federal_per_paycheck` (use the amount on your stub; leave out to estimate from IRS brackets) |
 | `recommendation.target_employee_contribution` | Pretax/Roth target: `"max"` (IRS limit incl. catch-up) or a dollar amount |
 | `recommendation.target_total_additions` | `after_tax` mode only: `"max"` (415(c) limit, 72,000 + catch-up), a dollar amount, or `"none"` |
 | `recommendation.expected_retirement_marginal_rate_percent` | Your guess at your combined retirement tax rate (default 22) |
@@ -103,8 +105,14 @@ as already done.
 - Employer match is computed per paycheck with no annual true-up, and only on pretax/Roth
   deferrals (not on after-tax money). If you hit the deferral limit early, match stops.
 - The 415(c) limit is treated as a hard stop for pretax, employer and after-tax money together.
-- Take-home cap uses the year's average tax rate; actual withholding differs paycheck to paycheck
-  (bonuses are withheld at a flat supplemental rate, for example), so "available" is an estimate.
+- Per-paycheck take-home uses modeled withholding: exact Social Security/Medicare, flat supplemental
+  federal rate on bonuses, and regular federal withholding estimated from the IRS percentage method
+  (checked to the cent against one real MFJ stub with the multiple-jobs box) or taken from
+  `regular_federal_per_paycheck`. Imputed income (e.g. group life) and deductions that change per
+  paycheck are not modeled, so a stub can differ by a few dollars. State withholding is the year's
+  estimated state tax spread over pay.
+- "Projected federal refund / owed" compares withholding to this salary's tax only. With a working
+  spouse or other income it is not a prediction of your return.
 - HSA: CA and NJ do not exclude HSA contributions from state tax; every other state is assumed to
   follow the federal exclusion. Employer HSA contributions are not modeled.
 - Earnings and the tax on converting after-tax money to Roth are not modeled.
