@@ -21,6 +21,7 @@ python -m unittest discover -s tests            # tests
 | `state` | Two-letter code (50 states + DC) |
 | `age_end_of_year` | Optional. 50+ adds the catch-up limit, 60-63 the super catch-up |
 | `pay.base_salary`, `frequency`, `first_pay_date` | `weekly`, `biweekly`, `semimonthly` (15th and month end), `monthly` (month end). `first_pay_date` is any real pay date, required for weekly/biweekly; 27-paycheck years are handled |
+| `monthly_expenses` | Optional. Adds a "From savings" column to the monthly cash flow: expenses minus net pay, in months where net pay falls short |
 | `pay.raise` | `effective_date` plus `new_salary` or `percent`. Applies to pay dates on or after the effective date |
 | `pay.bonus` | `pay_date` plus `amount` or `percent_of_salary` (of the salary in effect that day). If the date is a regular payday the bonus is added to that paycheck (so one paycheck's take-home covers everything taken from it); otherwise, or with `"separate_paycheck": true`, it is an off-cycle paycheck |
 | `deductions.hsa_per_paycheck`, `hsa_coverage` | Payroll HSA per regular paycheck; `hsa_coverage` (`self`/`family`) enables the annual limit check (55+ catch-up via `age_end_of_year`) |
@@ -55,6 +56,10 @@ After-tax money (`posttax_type: after_tax`)
 2. Percent = room / remaining eligible pay, rounded down, then capped at what take-home pay can
    cover after estimated taxes, HSA, premiums, other deductions and pretax 401(k). If the cap binds, the tool says how far
    short the year ends up. Elections that add to 100% of gross can never be fully deducted.
+
+The monthly cash flow tables show, per calendar month, gross, taxes, HSA/premiums, pretax and
+post-tax contributions, and net pay (what lands in the bank). "Cost" columns show how much take-home
+each contribution takes: post-tax costs its full amount, pretax costs less because it lowers taxes.
 
 Real-life payroll order: taxes, HSA, premiums and the pretax 401(k) come out first and the
 post-tax election takes what it asks for, limited by what is left. An election near 100% therefore

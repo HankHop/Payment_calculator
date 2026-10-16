@@ -81,6 +81,60 @@ def _election_lines(sc: Scenario, label: str) -> List[str]:
     return out
 
 
+def monthly(sc: Scenario, expenses=None) -> list:
+    """Per calendar month (by pay date): where each paycheck goes and what lands in the bank.
+    Taxes are allocated by gross at the year's average rate; the tax saved by pretax 401(k) is
+    allocated by each month's share of pretax contributions."""
+    r = sc.result
+    rate = sc.tax.total / r.gross if r.gross else 0.0
+    saved_total = max(0.0, sc.tax_without_pretax - sc.tax.total)
+    out = {}
+    for x in r.rows:
+        m = out.setdefault(x.pay_date.month, dict(month=x.pay_date.month, gross=0.0, taxes=0.0, other=0.0,
+                                                 pretax=0.0, posttax=0.0, tax_saved=0.0))
+        m["gross"] += x.gross
+        m["taxes"] += rate * x.gross
+        m["other"] += x.hsa + x.other_pretax + x.other_posttax
+        m["pretax"] += x.pretax
+        m["posttax"] += x.posttax
+        m["tax_saved"] += saved_total * x.pretax / r.pretax if r.pretax else 0.0
+    rows = []
+    for k in sorted(out):
+        m = out[k]
+        m["net"] = m["gross"] - m["taxes"] - m["other"] - m["pretax"] - m["posttax"]
+        m["pretax_cost"] = m["pretax"] - m["tax_saved"]       # what pretax actually takes from take-home
+        m["total_cost"] = m["pretax_cost"] + m["posttax"]
+        if expenses is not None:
+            m["from_savings"] = max(0.0, expenses - m["net"])
+        rows.append(m)
+    return rows
+
+
+_MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _monthly_lines(sc: Scenario, label: str, expenses, show_post: bool) -> List[str]:
+    rows = monthly(sc, expenses)
+    cols = [("Gross", "gross"), ("Taxes", "taxes"), ("HSA/prem/other", "other"), ("Pretax 401k", "pretax")]
+    if show_post:
+        cols.append(("Post-tax", "posttax"))
+    cols += [("Net pay", "net"), ("Pretax cost*", "pretax_cost")]
+    if show_post:
+        cols.append(("Total cost*", "total_cost"))
+    if expenses is not None:
+        cols.append(("From savings", "from_savings"))
+    out = ["", f"MONTHLY CASH FLOW - {label}",
+           "  " + f"{'':<6}" + "".join(f"{h:>15}" for h, _ in cols)]
+    for m in rows:
+        out.append("  " + f"{_MONTHS[m['month']]:<6}" + "".join(f"{m[k]:>15,.2f}" for _, k in cols))
+    out.append("  " + f"{'Total':<6}" + "".join(f"{sum(m[k] for m in rows):>15,.2f}" for _, k in cols))
+    out.append("  * Cost = how much your take-home drops because of the contribution. Pretax is cheaper "
+               "than its face amount because it lowers taxes; post-tax costs its full amount.")
+    if expenses is not None:
+        out.append(f"  From savings = monthly expenses ({_m(expenses)}) minus net pay, when net pay falls short.")
+    return out
+
+
 def text(a: Analysis, schedule: bool = False) -> str:
     cfg = a.cfg
     out: List[str] = []
@@ -117,6 +171,8 @@ def text(a: Analysis, schedule: bool = False) -> str:
     if show_post:
         out.extend(_election_lines(a.current, "Current elections"))
         out.extend(_election_lines(a.recommended, "Recommended elections"))
+    out.extend(_monthly_lines(a.current, "Current", cfg.monthly_expenses, show_post))
+    out.extend(_monthly_lines(a.recommended, "Recommended", cfg.monthly_expenses, show_post))
     out.append("")
 
     rec = a.recommendation
@@ -160,6 +216,8 @@ def as_dict(a: Analysis) -> dict:
             "social_security": round(t.social_security, 2), "medicare": round(t.medicare, 2),
             "total_taxes": round(t.total, 2), "net_pay": round(s.net_pay, 2),
             "limit_reached_on": str(r.limit_reached_on) if r.limit_reached_on else None,
+            "monthly": [{k: (round(v, 2) if k != "month" else v) for k, v in m.items()}
+                        for m in monthly(s, a.cfg.monthly_expenses)],
             "posttax_by_paycheck": [
                 {"date": str(x.pay_date), "kind": x.kind, "elected": round(x.posttax_requested, 2),
                  "available": round(x.posttax_available or 0.0, 2), "deducted": round(x.posttax, 2),

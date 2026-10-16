@@ -461,6 +461,38 @@ class TestRealLifeDeductions(unittest.TestCase):
         self.assertLessEqual(loaded.recommendation.posttax_percent, base.recommendation.posttax_percent)
 
 
+class TestMonthlyCashFlow(unittest.TestCase):
+    def test_monthly_sums_match_year(self):
+        a = analyze(bonus_month_cfg())
+        m = report.monthly(a.current)
+        r = a.current.result
+        self.assertEqual([x["month"] for x in m], list(range(1, 13)))
+        self.assertAlmostEqual(sum(x["net"] for x in m), a.current.net_pay, places=2)
+        self.assertAlmostEqual(sum(x["pretax"] for x in m), r.pretax, places=2)
+        self.assertAlmostEqual(sum(x["posttax"] for x in m), r.posttax, places=2)
+        self.assertAlmostEqual(sum(x["taxes"] for x in m), a.current.tax.total, places=2)
+
+    def test_pretax_costs_less_than_face_value(self):
+        a = analyze(bonus_month_cfg())
+        for x in report.monthly(a.current):
+            if x["pretax"] > 0:
+                self.assertLess(x["pretax_cost"], x["pretax"])
+        total_saved = sum(x["tax_saved"] for x in report.monthly(a.current))
+        self.assertAlmostEqual(total_saved, a.current.tax_without_pretax - a.current.tax.total, places=2)
+
+    def test_from_savings_when_net_pay_short_of_expenses(self):
+        a = analyze(bonus_month_cfg())
+        rows = report.monthly(a.current, expenses=6000)
+        for x in rows:
+            self.assertAlmostEqual(x["from_savings"], max(0.0, 6000 - x["net"]))
+        self.assertIn("From savings", report.text(analyze(bonus_month_cfg(monthly_expenses=6000))))
+        self.assertNotIn("From savings", report.text(a))
+
+    def test_negative_expenses_rejected(self):
+        with self.assertRaises(config.ConfigError):
+            bonus_month_cfg(monthly_expenses=-1)
+
+
 class TestConfigValidation(unittest.TestCase):
     def test_bad_filing_status(self):
         with self.assertRaises(config.ConfigError):

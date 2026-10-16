@@ -90,6 +90,7 @@ class Config:
     contributions: Contributions
     recommendation: Recommendation
     deductions: Deductions
+    monthly_expenses: Optional[float] = None   # optional: living costs paid from take-home
 
 
 def _date(value, field) -> date:
@@ -230,7 +231,9 @@ def parse(raw: dict) -> Config:
         _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7))
 
     return Config(year, status, state, age, as_of, float(salary), freq, first_pay, raise_, bonus,
-                  contributions, recommendation, deductions)
+                  contributions, recommendation, deductions,
+                  None if raw.get("monthly_expenses") is None
+                  else _pct(raw["monthly_expenses"], "monthly_expenses", 0, 1e9))
 
 
 def load(path) -> Config:

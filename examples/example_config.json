@@ -53,5 +53,6 @@
     "hsa_coverage": "family",
     "other_pretax_per_paycheck": 200,
     "other_posttax_per_paycheck": 25
-  }
+  },
+  "monthly_expenses": 6000
 }

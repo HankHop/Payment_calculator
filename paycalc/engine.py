@@ -18,6 +18,7 @@ class Scenario:
     result: YearResult
     tax: taxes.TaxSummary
     uncapped_posttax: float = 0.0   # post-tax the elections ask for before the take-home cap
+    tax_without_pretax: float = 0.0  # total tax if no pretax 401(k) were deducted
 
     @property
     def net_pay(self) -> float:
@@ -50,7 +51,9 @@ def _scenario(label, cfg, events, fed, st, plan) -> Scenario:
     if plan.take_home_rate is None:
         plan = replace(plan, take_home_rate=tax.total / result.gross)
         result = simulate(events, plan)
-    return Scenario(label, plan, result, tax, uncapped)
+    no_pretax = taxes.summarize(result.gross, 0.0, cfg.filing_status, fed, st,
+                                result.hsa, result.other_pretax).total
+    return Scenario(label, plan, result, tax, uncapped, no_pretax)
 
 
 def _hsa_limit(cfg: Config, fed: dict):
