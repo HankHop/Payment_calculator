@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# Personal inputs (salary etc.) stay out of git. Copy examples/example_config.json to one of these.
+config.json
+*.local.json

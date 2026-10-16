@@ -1,0 +1,39 @@
+{
+  "tax_year": 2026,
+  "filing_status": "single",
+  "state": "IL",
+  "age_end_of_year": 33,
+  "as_of_date": "2026-10-16",
+
+  "pay": {
+    "base_salary": 150000,
+    "frequency": "biweekly",
+    "first_pay_date": "2026-01-09",
+    "raise": {"effective_date": "2026-07-01", "percent": 5},
+    "bonus": {"pay_date": "2026-03-13", "percent_of_salary": 10}
+  },
+
+  "contributions": {
+    "posttax_type": "after_tax",
+    "elections": [
+      {"effective_date": "2026-01-09", "pretax_percent": 20, "posttax_percent": 0},
+      {"effective_date": "2026-08-07", "pretax_percent": 20, "posttax_percent": 80}
+    ],
+    "bonus_eligible_for_employee_contributions": false,
+    "employer": {
+      "match_rate_percent": 50,
+      "match_up_to_percent_of_pay": 6,
+      "nonelective_percent": 3,
+      "bonus_eligible_for_match": false,
+      "bonus_eligible_for_nonelective": false
+    }
+  },
+
+  "recommendation": {
+    "target_employee_contribution": "max",
+    "target_total_additions": "max",
+    "expected_retirement_marginal_rate_percent": 22,
+    "percent_step": 1,
+    "plan_max_percent": 100
+  }
+}

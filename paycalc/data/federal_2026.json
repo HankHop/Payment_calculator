@@ -1,0 +1,29 @@
+{
+  "year": 2026,
+  "sources": [
+    "IRS 2026 inflation adjustments (brackets, standard deduction)",
+    "IRS Notice on 2026 retirement plan limits (401(k), 415(c), 401(a)(17))",
+    "SSA 2026 contribution and benefit base"
+  ],
+  "standard_deduction": {"single": 16100, "mfj": 32200, "mfs": 16100, "hoh": 24150},
+  "brackets": {
+    "single": [[0, 0.10], [12400, 0.12], [50400, 0.22], [105700, 0.24], [201775, 0.32], [256225, 0.35], [640600, 0.37]],
+    "mfj":    [[0, 0.10], [24800, 0.12], [100800, 0.22], [211400, 0.24], [403550, 0.32], [512450, 0.35], [768700, 0.37]],
+    "mfs":    [[0, 0.10], [12400, 0.12], [50400, 0.22], [105700, 0.24], [201775, 0.32], [256225, 0.35], [384350, 0.37]],
+    "hoh":    [[0, 0.10], [17700, 0.12], [67450, 0.22], [105700, 0.24], [201750, 0.32], [256200, 0.35], [640600, 0.37]]
+  },
+  "fica": {
+    "ss_rate": 0.062,
+    "ss_wage_base": 184500,
+    "medicare_rate": 0.0145,
+    "addl_medicare_rate": 0.009,
+    "addl_medicare_threshold": {"single": 200000, "mfj": 250000, "mfs": 125000, "hoh": 200000}
+  },
+  "retirement": {
+    "elective_deferral_limit": 24500,
+    "catch_up_50_plus": 8000,
+    "catch_up_60_to_63": 11250,
+    "annual_additions_limit_415c": 72000,
+    "compensation_limit_401a17": 360000
+  }
+}
