@@ -125,9 +125,15 @@ function ensure() {
   if (S.pay.bonus) { S.pay.bonuses.unshift(S.pay.bonus); delete S.pay.bonus; }
   S.contributions = S.contributions || {};
   S.contributions.elections = S.contributions.elections || [];
+  sortElections();
   S.contributions.employer = S.contributions.employer || {};
   S.deductions = S.deductions || {};
   S.recommendation = S.recommendation || {};
+}
+function sortElections() {
+  // Oldest first; elections without a date yet stay at the end. Array.sort is stable.
+  const key = (e) => e.effective_date || "9999-12-31";
+  S.contributions.elections.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
 }
 function clean(v) {
   if (Array.isArray(v)) return v.map(clean);
@@ -228,7 +234,7 @@ function renderForm() {
       </div></div>`;
   });
   h += `<button data-act="add-election">+ Add an election change</button>
-    <div class="hint">Each election applies from its date onward. Percentages are of eligible pay; elections near 100% take whatever is left after taxes, HSA, premiums and pretax.</div>
+    <div class="hint">Each election applies from its date onward. Elections re-order themselves by date when you change a date, so you can add one for an earlier date. Percentages are of eligible pay; elections near 100% take whatever is left after taxes, HSA, premiums and pretax.</div>
     ${chk("contributions.bonus_eligible_for_employee_contributions", "Default: bonuses have my 401(k) % taken from them")}
   </div>`;
 
@@ -285,7 +291,8 @@ function onEdit(ev) {
     renderForm(); return schedule();
   }
   setPath(S, p, convert(el));
-  if (ev.type === "change" && el.dataset.re) renderForm();
+  if (ev.type === "change" && /^contributions\.elections\.\d+\.effective_date$/.test(p)) { sortElections(); renderForm(); }
+  else if (ev.type === "change" && el.dataset.re) renderForm();
   schedule();
 }
 document.addEventListener("click", (ev) => {

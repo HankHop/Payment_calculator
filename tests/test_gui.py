@@ -155,3 +155,16 @@ class GuiSecurityTest(unittest.TestCase):
         self.assertNotIn("eval(", html)
         self.assertNotIn("new Function", html)
         self.assertNotIn("document.write", html)
+
+
+class ElectionOrderTest(unittest.TestCase):
+    def test_page_sorts_elections_by_date_on_change(self):
+        html = (Path(gui.__file__).parent / "web" / "index.html").read_text()
+        self.assertIn("function sortElections", html)
+        self.assertIn("sortElections(); renderForm();", html)
+
+    def test_engine_accepts_elections_in_any_order(self):
+        a = json.loads(json.dumps(EXAMPLE))
+        b = json.loads(json.dumps(EXAMPLE))
+        b["contributions"]["elections"] = list(reversed(b["contributions"]["elections"]))
+        self.assertEqual(gui.run_analysis(a)["summary"], gui.run_analysis(b)["summary"])
