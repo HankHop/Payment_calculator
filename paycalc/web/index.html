@@ -35,6 +35,7 @@ button.danger { color: var(--bad); }
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
 label { display: block; font-size: 12px; color: var(--muted); }
+label[title] { cursor: help; }
 label > input, label > select { display: block; width: 100%; margin-top: 2px; }
 input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 5px 7px; min-width: 0; }
@@ -299,6 +300,73 @@ function renderForm() {
   </div></div>`;
 
   $("form").innerHTML = h;
+  applyTips();
+}
+
+
+// ---- hover help ------------------------------------------------------------------
+const TIPS = {
+  "filing_status": "Sets the federal brackets, standard deduction and the wage base used for tax. Changing it changes taxes, take-home pay and the refund or amount owed. Spouse income is not modeled either way.",
+  "state": "Picks the state income tax rules. No-income-tax states (TX, FL...) show zero state tax. Changing it changes taxes and take-home pay only; the 401(k) math is the same.",
+  "age_end_of_year": "Your age on Dec 31. At 50 or older the 401(k) catch-up applies, and at 55 or older the HSA catch-up applies, which raise the limits the calculator enforces.",
+  "as_of_date": "The date your numbers are current through. Paychecks on or before it keep the elections you actually had and are locked as history; the recommendation only applies to paychecks after it. Empty plans the whole year from January.",
+  "monthly_expenses": "Optional. Only used to compare take-home pay against your spending in the monthly view. It does not change any tax or contribution result.",
+  "pay.base_salary": "Annual salary before any raise. Regular paychecks are this divided by the number of pay periods. Percent-of-pay contributions, match and bonuses by percent all key off it.",
+  "pay.frequency": "How often you are paid. Sets the number of regular paychecks (52, 26, 24 or 12), which drives per-paycheck amounts, HSA and how many paychecks remain to reach a limit.",
+  "pay.first_pay_date": "Any one real pay date. The rest of the year's weekly or biweekly dates are counted from it. Only matters for weekly and biweekly pay.",
+  "_hasRaise": "Turns on a mid-year raise. Paychecks from the effective date use the new salary; earlier ones use the base salary.",
+  "pay.raise.effective_date": "First pay date paid at the new salary.",
+  "pay.raise.percent": "Raise as a percent of the base salary, for example 6 for 6%.",
+  "pay.raise.new_salary": "The full annual salary after the raise, instead of a percent.",
+  "pay.bonuses.*.name": "A label only. It shows in the paycheck list.",
+  "pay.bonuses.*.pay_date": "The pay date the bonus arrives. It is taxed and counted in the year of this date.",
+  "pay.bonuses.*.amount": "Gross bonus in dollars, before tax.",
+  "pay.bonuses.*.percent_of_salary": "Gross bonus as a percent of base salary. Dollars are worked out for you.",
+  "pay.bonuses.*.eligible_for_employee_contributions": "Whether your 401(k) percentages are taken from this bonus. No means percentages use base pay only; the bonus cash still counts as take-home and can cover an election on that date. Use your default unless this bonus differs.",
+  "pay.bonuses.*.eligible_for_match": "Whether the employer match is paid on this bonus. Yes raises the match you can earn; No leaves match based on regular pay only.",
+  "pay.bonuses.*.eligible_for_nonelective": "Whether the employer's unmatched (non-elective) contribution is paid on this bonus.",
+  "pay.bonuses.*.separate_paycheck": "Checked: the bonus is its own off-cycle paycheck, with no HSA or premiums taken. Unchecked: it is added to the regular paycheck on that date. Changes withholding and which paycheck the contribution comes out of.",
+  "contributions.posttax_type": "What your post-tax contributions are. Roth 401(k) counts toward the same employee limit as pretax. After-tax (non-Roth) is separate and only limited by the total 415(c) limit, which is the mega backdoor route.",
+  "contributions.acknowledge_mega_backdoor": "Confirmation that your plan allows converting after-tax money to Roth. Without it, after-tax figures stay hidden and are ignored.",
+  "contributions.elections.*.effective_date": "First pay date this election applies. It stays in force until the next election. Elections sort themselves by date.",
+  "contributions.elections.*.pretax_percent": "Percent of eligible pay deferred pretax. Lowers taxable income now. Counts toward the employee limit and earns match up to the employer's match cap.",
+  "contributions.elections.*.posttax_percent": "Percent of eligible pay contributed after tax. Limited by take-home pay and the total 415(c) limit. Raising it moves more of your pay into the retirement account and lowers take-home.",
+  "contributions.bonus_eligible_for_employee_contributions": "Default for all bonuses: whether your 401(k) percentages apply to them. A bonus can override this.",
+  "_hasWhatIf": "Turns on a scenario that replaces your elections from the date below onward, shown beside Current and Recommended. Nothing is saved as an election.",
+  "what_if.effective_date": "First paycheck the change would hit. Payroll often takes about two weeks, so use the first paycheck that will really change.",
+  "what_if.pretax_percent": "Pretax percent to try from that date on.",
+  "what_if.posttax_percent": "Post-tax percent to try from that date on.",
+  "contributions.employer.match_rate_percent": "Cents the employer adds per dollar you contribute. 100 means dollar for dollar, 50 means 50 cents.",
+  "contributions.employer.match_up_to_percent_of_pay": "The match applies to your contributions up to this percent of pay. Contributing less than this leaves match unclaimed.",
+  "contributions.employer.nonelective_percent": "Percent of pay the employer adds regardless of what you contribute.",
+  "contributions.employer.bonus_eligible_for_match": "Default for all bonuses: is match paid on them. A bonus can override this.",
+  "contributions.employer.bonus_eligible_for_nonelective": "Default for all bonuses: is the unmatched contribution paid on them. A bonus can override this.",
+  "deductions.hsa_per_paycheck": "HSA dollars taken from each regular paycheck. Pretax for federal tax and FICA. Ignored when Max out my HSA is checked.",
+  "deductions.hsa_coverage": "Self-only or family. Sets the annual HSA limit used for the warning and for Max out. Skip means no limit check.",
+  "deductions.hsa_employer_annual": "HSA money your employer puts in for the year. It counts toward the annual limit, so max-out subtracts it.",
+  "deductions.hsa_max_out": "Computes the HSA per paycheck as (annual limit minus employer contribution) divided by regular paychecks, rounded down to the cent. Needs HSA coverage set.",
+  "deductions.other_pretax_per_paycheck": "Medical, dental, vision, FSA and similar per paycheck. Reduces federal taxable income and FICA, and reduces take-home pay.",
+  "deductions.other_posttax_per_paycheck": "Anything taken after tax per paycheck (life insurance, dues, ESPP). Lowers take-home pay and does not change taxes.",
+  "withholding.supplemental_rate_percent": "Flat federal rate payroll withholds on bonuses. Empty means 22%. Changes how much is withheld on a bonus and so the refund or amount owed, not your actual tax.",
+  "withholding.changes.*.effective_date": "First pay date this W-4 setting applies. It stays in force until the next one.",
+  "withholding.changes.*.extra_federal_per_paycheck": "Extra dollars withheld each paycheck (W-4 step 4c). Raises withholding and lowers take-home pay and any amount owed at filing.",
+  "withholding.changes.*.regular_federal_per_paycheck": "Your actual federal withholding per regular paycheck, if you know it from a stub. Empty means the calculator estimates it from your W-4.",
+  "withholding.changes.*.multiple_jobs": "Matches the W-4 step 2 box. Checked makes payroll withhold at a higher rate as if the income were split across two jobs.",
+  "recommendation.target_employee_contribution": "How much to put in pretax or Roth for the year. 'max' uses the IRS employee limit; a dollar amount aims for that instead.",
+  "recommendation.target_total_additions": "Total yearly goal across your contributions and the employer's. 'max' uses the 415(c) limit; 'none' skips post-tax recommendations. A smaller dollar amount lowers the post-tax percent.",
+  "recommendation.expected_retirement_marginal_rate_percent": "Your guess at your tax rate in retirement. Higher favors pretax, lower favors Roth when splitting your elective money.",
+  "recommendation.percent_step": "How coarse the plan's percent choices are. 1 means whole percents only. A larger step gives rougher results and may leave you short of a limit; a smaller step (0.5) lets the recommendation land closer, if your plan allows decimals.",
+  "recommendation.plan_max_percent": "The most your plan lets you elect. The recommendation never goes above it, so a low value can leave you short of a limit.",
+  "act:raise-mode": "Enter the raise as a percent or as the new salary.",
+  "act:bonus-mode": "Enter the bonus in dollars or as a percent of salary."
+};
+function applyTips() {
+  document.querySelectorAll("#form [data-p], #form [data-act]").forEach((el) => {
+    const key = el.dataset.p ? el.dataset.p.replace(/\.\d+(?=\.|$)/g, ".*") : "act:" + el.dataset.act;
+    const tip = TIPS[key];
+    const lab = el.closest("label");
+    if (tip && lab) lab.title = tip;
+  });
 }
 
 // ---- form events ------------------------------------------------------------
