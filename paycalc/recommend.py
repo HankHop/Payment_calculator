@@ -189,6 +189,19 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
                  if (as_of is None or ev.pay_date > as_of) and ev.deferral_comp > 0), default=0.0)
             feasible = _floor_to(max(0.0, feasible), step)
             post_pct = min(wanted_pct, feasible, rc.plan_max_percent, 100 - pre_pct)
+            exact_post = need_post / rem_comp * 100
+            if post_pct == wanted_pct and wanted_pct < exact_post - 1e-9:
+                # Rounding down leaves the total short. Go a step over if take-home allows it and no
+                # paycheck loses employer money (payroll stops at the 415(c) limit).
+                cand = round(wanted_pct + step, 6)
+                if cand <= min(feasible, rc.plan_max_percent, 100 - pre_pct) + 1e-9:
+                    low = simulate(events, plan_with(pre_pct, wanted_pct, wh))
+                    high = simulate(events, plan_with(pre_pct, cand, wh))
+                    if high.employer >= low.employer - 0.005:
+                        post_pct = cand
+                        warnings.append(
+                            f"Rounded after-tax up to {cand:g}% (the exact need is {exact_post:.2f}%) so the "
+                            f"total reaches the limit without losing any employer contribution.")
             if post_pct < wanted_pct - 1e-9:
                 warnings.append(
                     f"Reaching the target needs {wanted_pct:g}% after-tax, but take-home pay after "

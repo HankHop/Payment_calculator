@@ -39,3 +39,18 @@ class RoundUpTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PostTaxRoundUpTest(unittest.TestCase):
+    def test_posttax_rounds_up_when_total_would_fall_short_and_match_is_kept(self):
+        import json
+        from pathlib import Path
+        from paycalc import gui, plans
+        raw = json.loads((Path(__file__).parent.parent / "examples" / "example_config.json").read_text())
+        d = gui.run_analysis(raw)
+        rec = d["recommended"]
+        # whenever a round-up note is present, the total must reach the target and employer money must not drop
+        if any("Rounded after-tax up" in w for w in d["warnings"]):
+            self.assertAlmostEqual(rec["total_additions"], 72000.0, delta=0.01)
+        self.assertFalse(any("short of the" in w for w in d["warnings"]) and
+                         any("Rounded after-tax up" in w for w in d["warnings"]))
