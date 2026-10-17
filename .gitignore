@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
-# Personal inputs (salary etc.) stay out of git. Copy examples/example_config.json to one of these.
-config.json
-*.local.json
+*.tmp
+# Every JSON file is ignored (your inputs, plans, anything you name yourself), except the files the app ships with.
+*.json
+!examples/example_config.json
+!paycalc/data/*.json
 plans/
