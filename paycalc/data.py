@@ -9,10 +9,20 @@ from .config import ConfigError
 _DIR = Path(__file__).parent / "data"
 
 
+def data_year(prefix: str, year: int) -> int:
+    """The year whose tables are used for `year`: the same year if present, otherwise the latest
+    earlier year (later years' figures are not published yet, so earlier ones stand in)."""
+    if (_DIR / f"{prefix}_{year}.json").exists():
+        return year
+    earlier = sorted(int(p.stem.rsplit("_", 1)[1]) for p in _DIR.glob(f"{prefix}_*.json")
+                     if p.stem.rsplit("_", 1)[1].isdigit() and int(p.stem.rsplit("_", 1)[1]) < year)
+    if not earlier:
+        raise ConfigError(f"No {prefix} tax data for {year}: expected {prefix}_{year}.json in paycalc/data")
+    return earlier[-1]
+
+
 def _load(prefix: str, year: int) -> dict:
-    path = _DIR / f"{prefix}_{year}.json"
-    if not path.exists():
-        raise ConfigError(f"No {prefix} tax data for {year}: expected {path.name} in paycalc/data")
+    path = _DIR / f"{prefix}_{data_year(prefix, year)}.json"
     return json.loads(path.read_text())
 
 

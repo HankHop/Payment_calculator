@@ -11,14 +11,16 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
-from . import data, report
+from . import data, plans, report
 from .config import ConfigError, parse
 from .engine import analyze
 
 PAGE = Path(__file__).parent / "web" / "index.html"
 EXAMPLE = Path(__file__).parent.parent / "examples" / "example_config.json"
 MAX_BODY = 1_000_000
+LATEST_YEAR = 9999  # asks the data loader for the newest tables it has
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 # The page is one file with inline script/style, so those two keep 'unsafe-inline'; everything else is locked down.
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
@@ -39,7 +41,14 @@ def run_analysis(raw: dict) -> dict:
     return report.as_dict(analyze(parse(raw)))
 
 
-def make_handler(config_path: Path):
+def _atomic_write(path: Path, raw: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(raw, indent=2) + "\n")
+    tmp.replace(path)
+
+
+def make_handler(main_path: Path):
     class Handler(BaseHTTPRequestHandler):
         server_version = "paycalc-gui"
 
@@ -80,12 +89,29 @@ def make_handler(config_path: Path):
             host = self.headers.get("Host") or ""
             return origin in (f"http://{host}",)
 
+        def _route(self):
+            """Returns (path, plan_path) or None. The only query parameter allowed is plan=<name>."""
+            u = urlparse(self.path)
+            q = parse_qs(u.query, keep_blank_values=True)
+            if set(q) - {"plan"} or len(q.get("plan", [])) > 1:
+                return None
+            try:
+                return u.path, plans.plan_path(main_path, q.get("plan", [plans.MAIN])[0])
+            except ConfigError:
+                return None
+
         def do_GET(self):
             if not self._local_only():
                 return self._json(403, {"error": "forbidden"})
-            if self.path in ("/", "/index.html"):
+            route = self._route()
+            if route is None:
+                return self._json(404, {"error": "not found"})
+            path, config_path = route
+            if path in ("/", "/index.html"):
                 return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-            if self.path == "/api/config":
+            if path == "/api/plans":
+                return self._json(200, {"plans": plans.list_plans(main_path)})
+            if path == "/api/config":
                 example = json.loads(EXAMPLE.read_text()) if EXAMPLE.exists() else _fallback_config()
                 if config_path.exists():
                     cfg, source = json.loads(config_path.read_text()), "saved"
@@ -93,8 +119,8 @@ def make_handler(config_path: Path):
                     cfg, source = example, "example"
                 return self._json(200, {"config": cfg, "example": example, "source": source,
                                         "path": str(config_path)})
-            if self.path == "/api/meta":
-                states = data._load("states", 2026)["states"]
+            if path == "/api/meta":
+                states = data._load("states", LATEST_YEAR)["states"]
                 return self._json(200, {"states": [{"code": k, "name": v["name"]}
                                                    for k, v in sorted(states.items(), key=lambda kv: kv[1]["name"])]})
             return self._json(404, {"error": "not found"})
@@ -102,6 +128,10 @@ def make_handler(config_path: Path):
         def do_POST(self):
             if not self._local_only() or not self._same_origin():
                 return self._json(403, {"error": "forbidden"})
+            route = self._route()
+            if route is None:
+                return self._json(404, {"error": "not found"})
+            path, config_path = route
             if "application/json" not in (self.headers.get("Content-Type") or ""):
                 return self._json(415, {"error": "expected application/json"})
             try:
@@ -114,14 +144,28 @@ def make_handler(config_path: Path):
                 raw = json.loads(self.rfile.read(length))
                 if not isinstance(raw, dict):
                     raise ConfigError("config must be a JSON object")
-                if self.path == "/api/analyze":
+                if path == "/api/analyze":
                     return self._json(200, run_analysis(raw))
-                if self.path == "/api/save":
+                if path == "/api/save":
                     parse(raw)  # refuse to save something that cannot be calculated
-                    tmp = config_path.with_name(config_path.name + ".tmp")
-                    tmp.write_text(json.dumps(raw, indent=2) + "\n")
-                    tmp.replace(config_path)
+                    _atomic_write(config_path, raw)
                     return self._json(200, {"saved": str(config_path)})
+                if path == "/api/rollover":
+                    # body: {"config": <current form>, "year": 2027, "name": optional}. Writes a NEW plan
+                    # file only; the plan it was built from is never touched.
+                    year = raw.get("year")
+                    if not isinstance(year, int) or isinstance(year, bool) or not 2000 <= year <= 2100:
+                        raise ConfigError("year: enter a year such as 2027")
+                    src = raw.get("config")
+                    if not isinstance(src, dict):
+                        raise ConfigError("config: missing")
+                    name = raw.get("name") or plans.next_name(main_path, year)
+                    target = plans.plan_path(main_path, name)
+                    if name == plans.MAIN or target.exists():
+                        raise ConfigError(f"plan {name!r} already exists; pick another name")
+                    new = plans.rollover(src, year)
+                    _atomic_write(target, new)
+                    return self._json(200, {"name": name, "saved": str(target), "config": new})
                 return self._json(404, {"error": "not found"})
             except (ConfigError, json.JSONDecodeError) as exc:
                 return self._json(400, {"error": str(exc)})

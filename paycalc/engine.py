@@ -127,6 +127,12 @@ def analyze(cfg: Config) -> Analysis:
             wi_notes.append("What-if: at least one paycheck gets a smaller employer match than the others.")
 
     warnings: List[str] = []
+    used = data.data_year("federal", cfg.tax_year)
+    if used != cfg.tax_year:
+        warnings.append(
+            f"{cfg.tax_year} IRS limits, tax brackets, standard deductions and the Social Security wage base "
+            f"are not in this app yet, so {used} figures are used as a stand-in. Real {cfg.tax_year} limits are "
+            f"usually a little higher; treat these results as a rough guide.")
     if not cfg.contributions.after_tax_enabled:
         warnings.append(
             "After-tax contributions are hidden and ignored. They only make sense if your plan allows "

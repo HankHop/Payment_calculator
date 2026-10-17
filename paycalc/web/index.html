@@ -83,6 +83,9 @@ details > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
   <h1>Paycheck Calculator</h1>
   <div class="status" id="status">Loading…</div>
   <div>
+    <label for="plan" class="status">Plan</label>
+    <select id="plan" title="Saved plans. 'main' is your real inputs."></select>
+    <button id="rollover" title="Create a new plan for a later year from what is on screen">Plan next year</button>
     <button id="reset" title="Replace the form with the example numbers">Reset to example</button>
     <button id="save" class="primary">Save inputs</button>
   </div>
@@ -352,7 +355,8 @@ document.addEventListener("click", (ev) => {
 
 // ---- calculate ----------------------------------------------------------------
 function payload() { return clean(JSON.parse(JSON.stringify(S))); }
-function schedule() { clearTimeout(TIMER); $("status").textContent = "Calculating…"; TIMER = setTimeout(calc, 350); }
+let DIRTY = false;
+function schedule() { DIRTY = true; clearTimeout(TIMER); $("status").textContent = "Calculating…"; TIMER = setTimeout(calc, 350); }
 async function calc() {
   const my = ++SEQ;
   try {
@@ -438,10 +442,49 @@ document.addEventListener("click", (ev) => {
 
 // ---- load / save -------------------------------------------------------------------
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2600); }
+let PLAN = "main";
+const planQ = () => (PLAN === "main" ? "" : "?plan=" + encodeURIComponent(PLAN));
 $("save").addEventListener("click", async () => {
-  const res = await fetch("/api/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload())});
+  const res = await fetch("/api/save" + planQ(), {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload())});
   const d = await res.json();
-  if (res.ok) { toast("Saved to " + d.saved); $("banner").hidden = true; } else toast(d.error || "Could not save");
+  if (res.ok) { DIRTY = false; toast("Saved to " + d.saved); $("banner").hidden = true; } else toast(d.error || "Could not save");
+});
+async function loadPlans(select) {
+  const d = await (await fetch("/api/plans")).json();
+  const sel = $("plan"); sel.textContent = "";
+  d.plans.forEach((p) => {
+    const o = document.createElement("option"); o.value = p.name;
+    o.textContent = p.name + (p.tax_year ? " (" + p.tax_year + ")" : "");
+    sel.appendChild(o);
+  });
+  sel.value = select || PLAN;
+}
+async function loadConfig() {
+  const c = await (await fetch("/api/config" + planQ())).json();
+  S = c.config; EXAMPLE = c.example; DIRTY = false;
+  const b = $("banner");
+  if (c.source === "example") {
+    b.hidden = false;
+    b.textContent = "These are example numbers, not yours. Replace them, then press Save inputs (saved to " + c.path + ").";
+  } else if (PLAN !== "main") {
+    b.hidden = false;
+    b.textContent = "Plan '" + PLAN + "': changes here are saved to " + c.path + " and never touch your main inputs.";
+  } else b.hidden = true;
+  ensure(); renderForm(); calc();
+}
+$("plan").addEventListener("change", async () => {
+  if (DIRTY && !confirm("Discard unsaved changes on this plan?")) { $("plan").value = PLAN; return; }
+  PLAN = $("plan").value; await loadConfig();
+});
+$("rollover").addEventListener("click", async () => {
+  const y = parseInt(prompt("Plan which year?", String((S.tax_year || 2026) + 1)), 10);
+  if (!y) return;
+  const res = await fetch("/api/rollover", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({year: y, config: payload()})});
+  const d = await res.json();
+  if (!res.ok) { toast(d.error || "Could not create plan"); return; }
+  PLAN = d.name; await loadPlans(PLAN); await loadConfig();
+  toast("Created plan " + d.name + ". Your other plans were not changed.");
 });
 $("reset").addEventListener("click", () => {
   if (!EXAMPLE) return;
@@ -449,13 +492,8 @@ $("reset").addEventListener("click", () => {
   S = JSON.parse(JSON.stringify(EXAMPLE)); ensure(); renderForm(); schedule();
 });
 (async function init() {
-  const [m, c] = await Promise.all([fetch("/api/meta").then((r) => r.json()), fetch("/api/config").then((r) => r.json())]);
-  META = m; S = c.config; EXAMPLE = c.example;
-  if (c.source === "example") {
-    $("banner").hidden = false;
-    $("banner").textContent = "These are example numbers, not yours. Replace them, then press Save inputs (saved to " + c.path + ").";
-  }
-  ensure(); renderForm(); calc();
+  META = await (await fetch("/api/meta")).json();
+  await loadPlans("main"); await loadConfig();
 })();
 </script>
 </body>

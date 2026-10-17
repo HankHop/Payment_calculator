@@ -56,6 +56,14 @@ python -m unittest discover -s tests            # tests (includes the GUI server
 | `recommendation.expected_retirement_marginal_rate_percent` | Your guess at your combined retirement tax rate (default 22) |
 | `recommendation.percent_step`, `plan_max_percent` | What your plan accepts (default 1% steps, 100% max) |
 
+## Planning a later year (plans)
+
+In the GUI, "Plan next year" creates a new saved plan from what is on screen and switches to it. The plan selector in the header switches between plans. Plans are stored in a `plans/` folder next to your main file (git-ignored); your main inputs are never modified by creating or editing a plan.
+
+The new plan carries forward the salary in force on Dec 31 (the raise is folded in), your last election and W-4 setting, deductions, employer terms and bonuses (same amounts, dates moved forward a year). It drops the raise, as-of date and what-if. Edit it for what actually changes.
+
+Years without published figures use the latest available year's limits, brackets and wage base, and the results carry a warning saying so. Real limits are usually a little higher.
+
 ## How the recommendation works
 
 Pretax / Roth (elective) money
