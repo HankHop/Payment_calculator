@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import List
+from typing import List, Optional
 
 from . import data, taxes
 from .config import Config
 from .recommend import Recommendation, recommend
 from .schedule import PayEvent, build_events
 from .withholding import Withholder
-from .simulate import Plan, YearResult, additions_cap, plan_from_config, simulate
+from .simulate import Plan, YearResult, additions_cap, plan_from_config, plan_from_elections, simulate
 
 
 @dataclass
@@ -60,6 +60,7 @@ class Analysis:
     recommended: Scenario
     recommendation: Recommendation
     warnings: List[str] = field(default_factory=list)
+    what_if: Optional[Scenario] = None
 
 
 def _scenario(label, cfg, events, fed, st, plan) -> Scenario:
@@ -102,6 +103,29 @@ def analyze(cfg: Config) -> Analysis:
     rec = recommend(cfg, events, fed, st)
     recommended = _scenario("Recommended", cfg, events, fed, st, rec.plan)
 
+    what_if = None
+    wi_notes: List[str] = []
+    if cfg.what_if is not None:
+        w = cfg.what_if
+        els = tuple((e.effective_date, e.pretax_percent, e.posttax_percent)
+                    for e in cfg.contributions.elections if e.effective_date < w.effective_date)
+        els += ((w.effective_date, w.pretax_percent, w.posttax_percent),)
+        what_if = _scenario("What-if", cfg, events, fed, st, plan_from_elections(cfg, fed, els))
+        wr = what_if.result
+        last = max(e.pay_date for e in events if e.kind != "bonus")
+        if wr.limit_reached_on and wr.limit_reached_on < last:
+            wi_notes.append(f"What-if: the elective limit is reached on {wr.limit_reached_on}; later paychecks get "
+                            f"no pretax contribution and no match.")
+        elif wr.elective < what_if.plan.employee_limit - 1.0:
+            wi_notes.append(f"What-if: ${what_if.plan.employee_limit - wr.elective:,.0f} of the elective limit "
+                            f"is left unused.")
+        if wr.total_cap_reached_on and wr.total_cap_reached_on < last:
+            wi_notes.append(f"What-if: the 415(c) total limit is reached on {wr.total_cap_reached_on}; later pretax, "
+                            f"employer and after-tax contributions stop.")
+        paid_after = [r for r in wr.rows if r.pay_date >= w.effective_date and r.kind != "bonus"]
+        if paid_after and min(r.match for r in paid_after) < max(r.match for r in paid_after) - 0.01:
+            wi_notes.append("What-if: at least one paycheck gets a smaller employer match than the others.")
+
     warnings: List[str] = []
     if not cfg.contributions.after_tax_enabled:
         warnings.append(
@@ -134,4 +158,5 @@ def analyze(cfg: Config) -> Analysis:
     if st.get("note"):
         warnings.append(f"{st['name']}: {st['note']}")
     warnings.extend(rec.warnings)
-    return Analysis(cfg, st["name"], events, current, recommended, rec, warnings)
+    warnings.extend(wi_notes)
+    return Analysis(cfg, st["name"], events, current, recommended, rec, warnings, what_if)

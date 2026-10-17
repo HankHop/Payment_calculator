@@ -96,6 +96,14 @@ class Withholding:
 
 
 @dataclass(frozen=True)
+class WhatIf:
+    """A proposed election change to estimate: replaces any election from effective_date onward."""
+    effective_date: date
+    pretax_percent: float
+    posttax_percent: float
+
+
+@dataclass(frozen=True)
 class Config:
     tax_year: int
     filing_status: str
@@ -112,6 +120,7 @@ class Config:
     deductions: Deductions
     monthly_expenses: Optional[float] = None   # optional: living costs paid from take-home
     withholding: Withholding = Withholding()
+    what_if: Optional[WhatIf] = None
 
 
 def _date(value, field) -> date:
@@ -282,11 +291,22 @@ def parse(raw: dict) -> Config:
     withholding = Withholding(_pct(w.get("supplemental_rate_percent", 22), "withholding.supplemental_rate_percent"),
                               tuple(changes))
 
+    what_if = None
+    wi = raw.get("what_if")
+    if wi:
+        f = "what_if"
+        pre = _pct(wi.get("pretax_percent", 0), f"{f}.pretax_percent")
+        post = _pct(wi.get("posttax_percent", 0), f"{f}.posttax_percent") if after_tax_enabled else 0.0
+        if pre + post > 100:
+            raise ConfigError(f"{f}: pretax_percent + posttax_percent exceeds 100")
+        what_if = WhatIf(_in_year(_date(wi.get("effective_date"), f"{f}.effective_date"), year,
+                                  f"{f}.effective_date"), pre, post)
+
     return Config(year, status, state, age, as_of, float(salary), freq, first_pay, raise_, tuple(bonuses),
                   contributions, recommendation, deductions,
                   None if raw.get("monthly_expenses") is None
                   else _pct(raw["monthly_expenses"], "monthly_expenses", 0, 1e9),
-                  withholding)
+                  withholding, what_if)
 
 
 def load(path) -> Config:

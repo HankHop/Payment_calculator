@@ -242,6 +242,19 @@ function renderForm() {
     ${chk("contributions.bonus_eligible_for_employee_contributions", "Default: my 401(k) % is applied to bonuses (unchecked = base pay only; bonus cash still counts as take-home)")}
   </div>`;
 
+  const wi = S.what_if;
+  h += `<div class="card"><h2>What if I change my contributions?</h2>
+    <label class="check"><input type="checkbox" data-p="_hasWhatIf" data-t="bool" ${wi ? "checked" : ""}><span>Estimate a change</span></label>`;
+  if (wi) {
+    h += `<div class="item"><div class="grid2">
+      ${txt("what_if.effective_date", "First paycheck it applies to", "date")}
+      ${num("what_if.pretax_percent", "Pretax %")}
+      ${postOn ? num("what_if.posttax_percent", (afterTax ? "After-tax" : "Roth") + " %") : ""}
+    </div></div>
+    <div class="hint">Payroll often needs about two weeks, so enter the first paycheck that will actually change. Elections before that date stay as entered above; later ones are replaced. Shown next to the recommendation.</div>`;
+  }
+  h += `</div>`;
+
   h += `<div class="card"><h2>Employer</h2><div class="grid2">
     ${num("contributions.employer.match_rate_percent", "Match rate %", "50 = 50 cents per dollar")}
     ${num("contributions.employer.match_up_to_percent_of_pay", "…up to % of pay")}
@@ -305,6 +318,14 @@ function onEdit(ev) {
     delete b.amount; delete b.percent_of_salary; b[el.value] = v; renderForm(); return schedule();
   }
   const p = el.dataset.p; if (!p) return;
+  if (p === "_hasWhatIf") {
+    if (el.checked) {
+      const last = S.contributions.elections[S.contributions.elections.length - 1] || {};
+      const d = new Date(S.as_of_date || Date.now()); d.setDate(d.getDate() + 15);
+      S.what_if = {effective_date: d.toISOString().slice(0, 10), pretax_percent: last.pretax_percent ?? 0, posttax_percent: last.posttax_percent ?? 0};
+    } else delete S.what_if;
+    renderForm(); return schedule();
+  }
   if (p === "_hasRaise") {
     if (el.checked) S.pay.raise = {effective_date: "", percent: 3}; else delete S.pay.raise;
     renderForm(); return schedule();
@@ -350,7 +371,9 @@ function showError(msg) {
 
 // ---- results ---------------------------------------------------------------------
 function seg() {
-  return `<div class="seg">${["current", "recommended"].map((k) => `<button data-view="${k}" class="${VIEW === k ? "on" : ""}">${k === "current" ? "Current elections" : "Recommended"}</button>`).join("")}</div>`;
+  const keys = ["current", "recommended", ...(LAST && LAST.what_if ? ["what_if"] : [])];
+  const names = {current: "Current elections", recommended: "Recommended", what_if: "What-if"};
+  return `<div class="seg">${keys.map((k) => `<button data-view="${k}" class="${VIEW === k ? "on" : ""}">${names[k]}</button>`).join("")}</div>`;
 }
 function table(head, rows, opts = {}) {
   return `<div class="tablewrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -361,6 +384,7 @@ function resultsHTML() {
   const recText = `${pct(R.pretax_percent)} pretax` + (m.after_tax_enabled && R.posttax_percent != null ? ` + ${pct(R.posttax_percent)} ${m.posttax_type === "after_tax" ? "after-tax" : "Roth"}` : "");
   h += `<div class="stats">
     <div class="stat"><div class="k">Recommended elections</div><div class="v">${recText}</div><div class="s">${R.effective_from ? "from the paycheck on " + R.effective_from : ""}</div></div>
+    ${d.what_if ? `<div class="stat"><div class="k">What-if elections</div><div class="v">${pct(m.what_if.pretax)} pretax${m.what_if.posttax != null ? " + " + pct(m.what_if.posttax) + (m.posttax_type === "after_tax" ? " after-tax" : " Roth") : ""}</div><div class="s">from ${esc(m.what_if.effective_date)} · into 401(k) ${money(d.what_if.total_additions, 0)} · pretax ${money(d.what_if.pretax, 0)}</div></div>` : ""}
     <div class="stat"><div class="k">Taxes (year)</div><div class="v">${money(rec.total_taxes, 0)}</div><div class="s">Current ${money(cur.total_taxes, 0)}</div></div>
     <div class="stat"><div class="k">${cur.fed_balance >= 0 ? "Projected federal refund" : "Projected federal tax owed"} (your pay only)</div><div class="v">${money(Math.abs(cur.fed_balance), 0)}</div><div class="s">Federal withheld ${money(cur.fed_withheld, 0)} vs tax ${money(cur.fed_withheld - cur.fed_balance, 0)}${cur.extra_withheld ? " · extra withholding " + money(cur.extra_withheld, 0) : ""}</div></div>
     <div class="stat"><div class="k">Net pay (year)</div><div class="v">${money(rec.net_pay, 0)}</div><div class="s">Current ${money(cur.net_pay, 0)}</div></div>
@@ -375,11 +399,11 @@ function resultsHTML() {
   m.elections.forEach((e) => lines.push(`Election from ${e.effective_date}: pretax ${pct(e.pretax)}${e.posttax != null ? ", post-tax " + pct(e.posttax) : ""}`));
   h += `<div class="card"><h2>Inputs as understood</h2><div class="hint" style="margin:0">${lines.join("<br>")}</div></div>`;
 
-  h += `<div class="card"><h2>Summary</h2>${table(["", "Current", "Recommended"], d.summary.map((r) =>
-    r.section ? `<tr class="section"><td colspan="3">${esc(r.label)}</td></tr>` : `<tr><td>${esc(r.label)}</td><td>${esc(r.current)}</td><td>${esc(r.recommended)}</td></tr>`).join(""))}</div>`;
+  h += `<div class="card"><h2>Summary</h2>${table(["", "Current", "Recommended", ...(d.what_if ? ["What-if"] : [])], d.summary.map((r) =>
+    r.section ? `<tr class="section"><td colspan="${d.what_if ? 4 : 3}">${esc(r.label)}</td></tr>` : `<tr><td>${esc(r.label)}</td><td>${esc(r.current)}</td><td>${esc(r.recommended)}</td>${d.what_if ? `<td>${esc(r.what_if)}</td>` : ""}</tr>`).join(""))}</div>`;
 
   h += `<div class="card">${seg()}`;
-  const sc = d[VIEW];
+  const sc = d[VIEW] || d.recommended;
   if (m.after_tax_enabled && sc.posttax_by_paycheck.length) {
     const rows = sc.posttax_by_paycheck;
     h += `<h2>Post-tax election vs. available pay</h2><div class="hint" style="margin:0 0 6px">Taxes, HSA, premiums and pretax 401(k) come out first. The election takes what it asks for, limited by what is left.</div>` +

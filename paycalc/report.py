@@ -20,16 +20,18 @@ def _rows(a: Analysis):
     post = "After-tax" if a.cfg.contributions.posttax_type == "after_tax" else "Roth"
     show_post = a.cfg.contributions.after_tax_enabled
 
+    wi = a.what_if
+
     def row(label, f, fmt=_m):
-        return (label, fmt(f(cur)), fmt(f(rec)))
+        return (label, fmt(f(cur)), fmt(f(rec)), fmt(f(wi)) if wi else "")
 
     return [
-        ("PAY", "", ""),
+        ("PAY", "", "", ""),
         row("Gross pay", lambda s: s.result.gross),
         *([row("HSA (payroll)", lambda s: s.result.hsa)] if cur.result.hsa else []),
         *([row("Other pretax deductions", lambda s: s.result.other_pretax)] if cur.result.other_pretax else []),
         *([row("Other post-tax deductions", lambda s: s.result.other_posttax)] if cur.result.other_posttax else []),
-        ("CONTRIBUTIONS", "", ""),
+        ("CONTRIBUTIONS", "", "", ""),
         row("Pretax percent (going forward)", lambda s: s.plan.pretax_percent, _p),
         *([row(f"{post} percent (going forward)", lambda s: s.plan.posttax_percent, _p)] if show_post else []),
         row("Pretax contributions", lambda s: s.result.pretax),
@@ -40,7 +42,7 @@ def _rows(a: Analysis):
         *([row("Total additions (415(c))", lambda s: s.result.total_additions)] if show_post else []),
         row("Unused elective limit", lambda s: max(0.0, s.plan.employee_limit - s.result.elective)),
         *([row("Unused 415(c) room", lambda s: max(0.0, s.plan.total_cap - s.result.total_additions))] if show_post else []),
-        ("ESTIMATED TAXES", "", ""),
+        ("ESTIMATED TAXES", "", "", ""),
         row("Federal taxable income", lambda s: s.tax.federal_taxable),
         row("Federal income tax", lambda s: s.tax.federal),
         row(f"State income tax ({a.state_name})", lambda s: s.tax.state),
@@ -50,12 +52,12 @@ def _rows(a: Analysis):
         row("Effective tax rate", lambda s: s.tax.total / s.result.gross * 100, lambda v: f"{v:.2f}%"),
         row("Marginal rate (fed + state)", lambda s: (s.tax.marginal_federal + s.tax.marginal_state) * 100,
             lambda v: f"{v:.2f}%"),
-        ("WITHHOLDING (what payroll takes from each paycheck)", "", ""),
+        ("WITHHOLDING (what payroll takes from each paycheck)", "", "", ""),
         row("Federal income tax withheld", lambda s: s.fed_withheld),
         *([row("  of which W-4 extra withholding", lambda s: s.extra_withheld)] if cur.extra_withheld else []),
         row("Projected federal refund (+) / owed (-)", lambda s: s.fed_balance),
         row("All taxes withheld (fed, FICA, state)", lambda s: s.withheld_total),
-        ("TAKE-HOME", "", ""),
+        ("TAKE-HOME", "", "", ""),
         row("Net pay for the year (paychecks)", lambda s: s.net_pay),
         row("Net pay once the year's tax is settled", lambda s: s.net_pay_settled),
     ]
@@ -175,19 +177,24 @@ def text(a: Analysis, schedule: bool = False) -> str:
 
     rows = _rows(a)
     w0 = max(len(r[0]) for r in rows) + 2
-    w1 = max(len(r[1]) for r in rows + [("", "Current", "")]) + 2
-    out.append(f"{'':<{w0}}{'Current':>{w1}}{'Recommended':>{w1 + 2}}")
-    for label, c, r in rows:
+    w1 = max(len(r[1]) for r in rows + [("", "Current", "", "")]) + 2
+    wi_head = f"{'What-if':>{w1 + 2}}" if a.what_if else ""
+    out.append(f"{'':<{w0}}{'Current':>{w1}}{'Recommended':>{w1 + 2}}{wi_head}")
+    for label, c, r, wi in rows:
         if not c and not r:
             out.append("")
             out.append(label)
         else:
-            out.append(f"  {label:<{w0 - 2}}{c:>{w1}}{r:>{w1 + 2}}")
+            out.append(f"  {label:<{w0 - 2}}{c:>{w1}}{r:>{w1 + 2}}" + (f"{wi:>{w1 + 2}}" if a.what_if else ""))
     if show_post:
         out.extend(_election_lines(a.current, "Current elections"))
         out.extend(_election_lines(a.recommended, "Recommended elections"))
+        if a.what_if:
+            out.extend(_election_lines(a.what_if, "What-if elections"))
     out.extend(_monthly_lines(a.current, "Current", cfg.monthly_expenses, show_post))
     out.extend(_monthly_lines(a.recommended, "Recommended", cfg.monthly_expenses, show_post))
+    if a.what_if:
+        out.extend(_monthly_lines(a.what_if, "What-if", cfg.monthly_expenses, show_post))
     out.append("")
 
     rec = a.recommendation
@@ -206,7 +213,7 @@ def text(a: Analysis, schedule: bool = False) -> str:
         out.extend(f"  - {w}" for w in a.warnings)
 
     if schedule:
-        for sc in (a.current, a.recommended):
+        for sc in (a.current, a.recommended, *([a.what_if] if a.what_if else [])):
             out.append("")
             out.append(f"{sc.label} - by pay date")
             post_h = f"{'post-tax':>11}" if show_post else ""
@@ -265,14 +272,17 @@ def as_dict(a: Analysis) -> dict:
             "bonuses": [{"name": b.name, "date": str(b.pay_date), "gross": round(b.gross, 2),
                          "employee": b.employee, "match": b.match, "unmatched": b.nonelective,
                          "with_regular": b.with_regular} for b in resolved_bonuses(cfg)],
+            "what_if": ({"effective_date": str(cfg.what_if.effective_date), "pretax": cfg.what_if.pretax_percent,
+                         "posttax": cfg.what_if.posttax_percent if show_post else None} if cfg.what_if else None),
             "elections": [{"effective_date": str(e.effective_date), "pretax": e.pretax_percent,
                            "posttax": e.posttax_percent if show_post else None}
                           for e in cfg.contributions.elections],
         },
-        "summary": [{"label": l, "current": c, "recommended": r, "section": not c and not r}
-                    for l, c, r in _rows(a)],
+        "summary": [{"label": l, "current": c, "recommended": r, "what_if": wi, "section": not c and not r}
+                    for l, c, r, wi in _rows(a)],
         "current": sc(a.current),
         "recommended": sc(a.recommended),
+        "what_if": sc(a.what_if) if a.what_if else None,
         "recommendation": {
             "pretax_percent": rec.pretax_percent,
             "posttax_percent": rec.posttax_percent if show_post else None,

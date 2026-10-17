@@ -48,6 +48,7 @@ python -m unittest discover -s tests            # tests (includes the GUI server
 | `employer.match_rate_percent`, `match_up_to_percent_of_pay` | e.g. 50 and 6 = 50% of your first 6% |
 | `employer.nonelective_percent` | Unmatched employer contribution, % of eligible pay |
 | `employer.bonus_eligible_for_match`, `bonus_eligible_for_nonelective` | Whether those are paid on the bonus |
+| `what_if` | Optional `{effective_date, pretax_percent, posttax_percent}`: estimate a proposed election change. It replaces any election from that date on and is shown next to Current and Recommended (summary column, tab, notes). Use the first paycheck that will actually change, since payroll often needs about two weeks |
 | `withholding.supplemental_rate_percent` | Flat federal withholding on bonus pay (default 22; 37% applies above $1M of bonuses) |
 | `withholding.changes` | List of W-4 settings, each from its `effective_date` onward: `multiple_jobs` (step 2 box), `extra_federal_per_paycheck` (step 4(c)), optional `regular_federal_per_paycheck` (use the amount on your stub; leave out to estimate from IRS brackets) |
 | `recommendation.target_employee_contribution` | Pretax/Roth target: `"max"` (IRS limit incl. catch-up) or a dollar amount |
