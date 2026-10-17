@@ -78,6 +78,8 @@ class Deductions:
     hsa_coverage: Optional[str]           # "self", "family" or None (skips the HSA limit check)
     other_pretax_per_paycheck: float      # Section 125 premiums: medical, dental, vision, FSA
     other_posttax_per_paycheck: float     # life insurance, dues, ESPP, etc.
+    hsa_max_out: bool = False             # derive hsa_per_paycheck from the annual limit
+    hsa_employer_annual: float = 0.0      # employer HSA money for the year (counts toward the limit)
 
 
 @dataclass(frozen=True)
@@ -273,7 +275,11 @@ def parse(raw: dict) -> Config:
         _pct(d.get("hsa_per_paycheck", 0), "deductions.hsa_per_paycheck", 0, 1e7),
         coverage,
         _pct(d.get("other_pretax_per_paycheck", 0), "deductions.other_pretax_per_paycheck", 0, 1e7),
-        _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7))
+        _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7),
+        _bool(d.get("hsa_max_out", False), "deductions.hsa_max_out"),
+        _pct(d.get("hsa_employer_annual", 0), "deductions.hsa_employer_annual", 0, 1e7))
+    if deductions.hsa_max_out and coverage is None:
+        raise ConfigError("deductions.hsa_max_out needs hsa_coverage ('self' or 'family')")
 
     w = raw.get("withholding") or {}
     changes = []

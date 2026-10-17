@@ -1,13 +1,14 @@
 """Tie config, schedule, simulation, taxes and recommendation together."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from . import data, taxes
 from .config import Config
 from .recommend import Recommendation, recommend
-from .schedule import PayEvent, build_events
+from .schedule import PayEvent, build_events, pay_dates
 from .withholding import Withholder
 from .simulate import Plan, YearResult, additions_cap, plan_from_config, plan_from_elections, simulate
 
@@ -94,9 +95,24 @@ def _hsa_limit(cfg: Config, fed: dict):
     return float(limit)
 
 
+def _resolve_hsa(cfg: Config, fed: dict):
+    """With hsa_max_out, the payroll amount is (annual limit - employer HSA money) / regular paychecks,
+    rounded down to the cent so the limit is never exceeded."""
+    d = cfg.deductions
+    if not d.hsa_max_out:
+        return cfg, None
+    limit = _hsa_limit(cfg, fed)
+    n = len(pay_dates(cfg.tax_year, cfg.frequency, cfg.first_pay_date))
+    per = math.floor(max(0.0, limit - d.hsa_employer_annual) / n * 100) / 100
+    return (replace(cfg, deductions=replace(d, hsa_per_paycheck=per)),
+            f"HSA set to ${per:,.2f} per paycheck: {cfg.tax_year} limit ${limit:,.0f} minus "
+            f"${d.hsa_employer_annual:,.0f} from your employer, over {n} paychecks.")
+
+
 def analyze(cfg: Config) -> Analysis:
     fed = data.federal(cfg.tax_year)
     st = data.state(cfg.tax_year, cfg.state)
+    cfg, hsa_note = _resolve_hsa(cfg, fed)
     events = build_events(cfg)
 
     current = _scenario("Current", cfg, events, fed, st, plan_from_config(cfg, fed))
@@ -127,6 +143,8 @@ def analyze(cfg: Config) -> Analysis:
             wi_notes.append("What-if: at least one paycheck gets a smaller employer match than the others.")
 
     warnings: List[str] = []
+    if hsa_note:
+        warnings.append(hsa_note)
     used = data.data_year("federal", cfg.tax_year)
     if used != cfg.tax_year:
         warnings.append(
