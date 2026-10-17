@@ -32,6 +32,7 @@ class Bonus:
     eligible_for_employee_contributions: Optional[bool] = None
     eligible_for_match: Optional[bool] = None
     eligible_for_nonelective: Optional[bool] = None
+    payout_multiplier_percent: float = 100.0  # company payout factor; only scales percent_of_salary
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,9 @@ def parse(raw: dict) -> Config:
         amount, pct = b.get("amount"), b.get("percent_of_salary")
         if (amount is None) == (pct is None):
             raise ConfigError(f"{f}: give exactly one of amount or percent_of_salary")
+        mult = b.get("payout_multiplier_percent")
+        if mult is not None and pct is None:
+            raise ConfigError(f"{f}.payout_multiplier_percent only applies with percent_of_salary")
         flags = {}
         for key in ("eligible_for_employee_contributions", "eligible_for_match", "eligible_for_nonelective"):
             v = b.get(key)
@@ -209,7 +213,9 @@ def parse(raw: dict) -> Config:
             flags[key] = v
         bonuses.append(Bonus(d, float(amount) if amount is not None else None,
                              _pct(pct, f"{f}.percent_of_salary", 0, 1000) if pct is not None else None,
-                             bool(b.get("separate_paycheck", False)), str(b.get("name", "")), **flags))
+                             bool(b.get("separate_paycheck", False)), str(b.get("name", "")), **flags,
+                             payout_multiplier_percent=100.0 if mult is None
+                             else _pct(mult, f"{f}.payout_multiplier_percent", 0, 1000)))
 
     c = raw.get("contributions") or {}
     e = c.get("employer") or {}

@@ -218,6 +218,7 @@ function renderForm() {
         ${txt(`pay.bonuses.${i}.pay_date`, "Pay date", "date")}
         <label>Amount as<select data-act="bonus-mode" data-i="${i}"><option value="amount" ${mode==="amount"?"selected":""}>Dollars</option><option value="percent_of_salary" ${mode==="percent_of_salary"?"selected":""}>% of salary</option></select></label>
         ${num(`pay.bonuses.${i}.${mode}`, mode === "amount" ? "Dollars" : "% of salary")}
+        ${mode === "percent_of_salary" ? num(`pay.bonuses.${i}.payout_multiplier_percent`, "Company payout %", "Leave empty for 100%. 106 means 6% above target") : ""}
         ${tri(`pay.bonuses.${i}.eligible_for_employee_contributions`, "My 401(k) % applied to it?", "No = percentages use base pay only. Its cash still counts as take-home, so it can cover the election on that paycheck.")}
         ${tri(`pay.bonuses.${i}.eligible_for_match`, "Employer match on it?")}
         ${tri(`pay.bonuses.${i}.eligible_for_nonelective`, "Employer unmatched on it?")}
@@ -323,6 +324,7 @@ const TIPS = {
   "pay.bonuses.*.pay_date": "The pay date the bonus arrives. It is taxed and counted in the year of this date.",
   "pay.bonuses.*.amount": "Gross bonus in dollars, before tax.",
   "pay.bonuses.*.percent_of_salary": "Gross bonus as a percent of base salary. Dollars are worked out for you.",
+  "pay.bonuses.*.payout_multiplier_percent": "The company-wide payout factor applied to a percent-of-salary bonus. Bonus = salary x target % x this %. 100 is a target payout, 106 pays 6% more. Empty means 100. Not used with a dollar amount.",
   "pay.bonuses.*.eligible_for_employee_contributions": "Whether your 401(k) percentages are taken from this bonus. No means percentages use base pay only; the bonus cash still counts as take-home and can cover an election on that date. Use your default unless this bonus differs.",
   "pay.bonuses.*.eligible_for_match": "Whether the employer match is paid on this bonus. Yes raises the match you can earn; No leaves match based on regular pay only.",
   "pay.bonuses.*.eligible_for_nonelective": "Whether the employer's unmatched (non-elective) contribution is paid on this bonus.",
@@ -390,7 +392,7 @@ function onEdit(ev) {
   }
   if (el.dataset.act === "bonus-mode") {
     const b = S.pay.bonuses[+el.dataset.i]; const v = b.amount ?? b.percent_of_salary;
-    delete b.amount; delete b.percent_of_salary; b[el.value] = v; renderForm(); return schedule();
+    delete b.amount; delete b.percent_of_salary; if (el.value === "amount") delete b.payout_multiplier_percent; b[el.value] = v; renderForm(); return schedule();
   }
   const p = el.dataset.p; if (!p) return;
   if (p === "_hasWhatIf") {

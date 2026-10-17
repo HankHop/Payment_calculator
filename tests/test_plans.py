@@ -134,3 +134,19 @@ class PlanRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BonusMultiplierTest(unittest.TestCase):
+    def test_percent_bonus_scaled_by_payout(self):
+        from paycalc.schedule import build_events
+        c = sample()
+        c["pay"]["bonuses"] = [{"name": "annual", "pay_date": "2026-02-27", "percent_of_salary": 13,
+                                "payout_multiplier_percent": 106, "separate_paycheck": True}]
+        ev = [e for e in build_events(parse(c)) if e.kind == "bonus"][0]
+        self.assertAlmostEqual(ev.gross, c["pay"]["base_salary"] * 0.13 * 1.06, places=2)
+
+    def test_multiplier_with_dollar_amount_rejected(self):
+        c = sample()
+        c["pay"]["bonuses"] = [{"pay_date": "2026-02-27", "amount": 100, "payout_multiplier_percent": 106}]
+        with self.assertRaises(ConfigError):
+            parse(c)

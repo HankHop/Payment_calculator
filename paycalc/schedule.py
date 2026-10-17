@@ -73,7 +73,7 @@ def resolved_bonuses(cfg: Config) -> List[ResolvedBonus]:
 
     out = []
     for i, b in enumerate(cfg.bonuses, 1):
-        gross = b.amount if b.amount is not None else salary_on(cfg, b.pay_date) * b.percent_of_salary / 100
+        gross = b.amount if b.amount is not None else salary_on(cfg, b.pay_date) * b.percent_of_salary / 100 * b.payout_multiplier_percent / 100
         out.append(ResolvedBonus(
             b.name or f"bonus {i}", b.pay_date, gross,
             pick(b.eligible_for_employee_contributions, ct.bonus_eligible_for_employee_contributions),
