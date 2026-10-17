@@ -136,7 +136,18 @@ def recommend(cfg: Config, events: Sequence[PayEvent], fed: dict, st: dict) -> R
     elective_pct = min(_floor_to(exact, step), rc.plan_max_percent)
     if elective_pct < exact - 1e-9 and elective_pct == rc.plan_max_percent:
         warnings.append(f"Plan maximum of {elective_pct:g}% is below the {exact:.2f}% needed to reach the target.")
-    elective_dollars = elective_pct / 100 * rem_comp
+    rounded_up = False
+    if elective_pct < exact - 1e-9 and elective_pct < rc.plan_max_percent:
+        # Going a step over is fine (payroll stops at the limit) as long as no paycheck loses match.
+        cand = min(round(elective_pct + step, 6), rc.plan_max_percent)
+        low, high = simulate(events, plan_with(elective_pct, 0.0)), simulate(events, plan_with(cand, 0.0))
+        if cand > elective_pct and high.match >= low.match - 0.005:
+            elective_pct, rounded_up = cand, True
+    elective_dollars = min(elective_pct / 100 * rem_comp, need)
+    if rounded_up:
+        reached = simulate(events, plan_with(elective_pct, 0.0)).limit_reached_on
+        warnings.append(f"Rounded up to {elective_pct:g}% (the exact need is {exact:.2f}%) so the limit is reached"
+                        f"{' on ' + str(reached) if reached else ''} without losing any employer match.")
     gross = sum(e.gross for e in events)
     hsa_total = sum(e.hsa for e in events)
     other_pretax_total = sum(e.other_pretax for e in events)
