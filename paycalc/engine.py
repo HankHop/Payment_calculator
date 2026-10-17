@@ -89,7 +89,9 @@ def _hsa_limit(cfg: Config, fed: dict):
     if cov is None:
         return None
     h = fed["hsa"]
-    limit = h["self_only"] if cov == "self" else h["family"]
+    limit = cfg.deductions.hsa_limit_override
+    if limit is None:
+        limit = h["self_only"] if cov == "self" else h["family"]
     if cfg.age_end_of_year is not None and cfg.age_end_of_year >= 55:
         limit += h["catch_up_55"]
     return float(limit)
@@ -105,7 +107,8 @@ def _resolve_hsa(cfg: Config, fed: dict):
     n = len(pay_dates(cfg.tax_year, cfg.frequency, cfg.first_pay_date))
     per = math.floor(max(0.0, limit - d.hsa_employer_annual) / n * 100) / 100
     return (replace(cfg, deductions=replace(d, hsa_per_paycheck=per)),
-            f"HSA set to ${per:,.2f} per paycheck: {cfg.tax_year} limit ${limit:,.0f} minus "
+            f"HSA set to ${per:,.2f} per paycheck: {cfg.tax_year} limit ${limit:,.0f}"
+            f"{' (your override)' if d.hsa_limit_override is not None else ''} minus "
             f"${d.hsa_employer_annual:,.0f} from your employer, over {n} paychecks.")
 
 

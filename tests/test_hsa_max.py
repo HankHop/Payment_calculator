@@ -40,3 +40,12 @@ class HsaMaxOutTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HsaOverrideTest(unittest.TestCase):
+    def test_override_replaces_table_limit(self):
+        a = analyze(parse(cfg(hsa_coverage="family", hsa_max_out=True, hsa_employer_annual=1500,
+                              hsa_limit_override=9000)))
+        reg = [r for r in a.current.result.rows if r.kind != "bonus"]
+        self.assertAlmostEqual(reg[0].hsa, 312.5, places=2)  # (9000 - 1500) / 24
+        self.assertTrue(any("your override" in w for w in a.warnings))

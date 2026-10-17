@@ -270,6 +270,7 @@ function renderForm() {
   h += `<div class="card"><h2>Payroll deductions (per regular paycheck)</h2><div class="grid2">
     ${num("deductions.hsa_per_paycheck", "HSA", S.deductions && S.deductions.hsa_max_out ? "Ignored: max-out is on" : "")}
     ${sel("deductions.hsa_coverage", "HSA coverage", [["","Skip limit check"],["self","Self-only"],["family","Family"]])}
+    ${num("deductions.hsa_limit_override", "HSA annual limit (optional)", "Overrides the built-in limit, e.g. when this year's limit is newer than the app")}
     ${num("deductions.hsa_employer_annual", "Employer HSA contribution (per year)", "Counts toward the annual limit")}
     ${num("deductions.other_pretax_per_paycheck", "Premiums / FSA (pretax)")}
     ${num("deductions.other_posttax_per_paycheck", "Other post-tax")}
@@ -343,6 +344,7 @@ const TIPS = {
   "contributions.employer.bonus_eligible_for_nonelective": "Default for all bonuses: is the unmatched contribution paid on them. A bonus can override this.",
   "deductions.hsa_per_paycheck": "HSA dollars taken from each regular paycheck. Pretax for federal tax and FICA. Ignored when Max out my HSA is checked.",
   "deductions.hsa_coverage": "Self-only or family. Sets the annual HSA limit used for the warning and for Max out. Skip means no limit check.",
+  "deductions.hsa_limit_override": "Your coverage's annual HSA limit, used instead of the built-in table (the 55+ catch-up is still added if it applies). Use it when the IRS limit for your year is newer than the app's data. Empty uses the built-in figure. Changes the max-out amount and the over-limit warning.",
   "deductions.hsa_employer_annual": "HSA money your employer puts in for the year. It counts toward the annual limit, so max-out subtracts it.",
   "deductions.hsa_max_out": "Computes the HSA per paycheck as (annual limit minus employer contribution) divided by regular paychecks, rounded down to the cent. Needs HSA coverage set.",
   "deductions.other_pretax_per_paycheck": "Medical, dental, vision, FSA and similar per paycheck. Reduces federal taxable income and FICA, and reduces take-home pay.",

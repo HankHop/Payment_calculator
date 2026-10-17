@@ -80,6 +80,7 @@ class Deductions:
     other_posttax_per_paycheck: float     # life insurance, dues, ESPP, etc.
     hsa_max_out: bool = False             # derive hsa_per_paycheck from the annual limit
     hsa_employer_annual: float = 0.0      # employer HSA money for the year (counts toward the limit)
+    hsa_limit_override: Optional[float] = None  # your coverage's annual limit, replaces the built-in table
 
 
 @dataclass(frozen=True)
@@ -277,7 +278,9 @@ def parse(raw: dict) -> Config:
         _pct(d.get("other_pretax_per_paycheck", 0), "deductions.other_pretax_per_paycheck", 0, 1e7),
         _pct(d.get("other_posttax_per_paycheck", 0), "deductions.other_posttax_per_paycheck", 0, 1e7),
         _bool(d.get("hsa_max_out", False), "deductions.hsa_max_out"),
-        _pct(d.get("hsa_employer_annual", 0), "deductions.hsa_employer_annual", 0, 1e7))
+        _pct(d.get("hsa_employer_annual", 0), "deductions.hsa_employer_annual", 0, 1e7),
+        None if d.get("hsa_limit_override") is None
+        else _pct(d["hsa_limit_override"], "deductions.hsa_limit_override", 0, 1e7))
     if deductions.hsa_max_out and coverage is None:
         raise ConfigError("deductions.hsa_max_out needs hsa_coverage ('self' or 'family')")
 
