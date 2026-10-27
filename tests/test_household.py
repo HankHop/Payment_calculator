@@ -107,6 +107,70 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(run(h, you=you)["meta"]["start_month"], 11)
 
 
+class OverrideSolveTest(unittest.TestCase):
+    def setUp(self):
+        self.you = copy.deepcopy(EXAMPLE)
+        self.hh = H.parse_household({"expenses": [{"name": "bills", "monthly": 4000, "account": "joint"}],
+                                     "start_month": 7, "inheritance_balance": 0,
+                                     "you_override": {"effective_date": "2026-07-10", "pretax_percent": 10,
+                                                      "posttax_percent": 20}})
+
+    def test_override_becomes_household_what_if_scenario(self):
+        r = H.analyze_household(parse(H.with_override(self.you, self.hh)), parse(copy.deepcopy(EXAMPLE)), self.hh)
+        sc = [x for x in r["scenarios"] if x["key"] == "what_if"][0]
+        self.assertEqual(sc["label"], "Household what-if")
+        self.assertEqual((sc["you_pretax_percent"], sc["you_posttax_percent"]), (10.0, 20.0))
+        self.assertNotIn("what_if", self.you)  # caller's config is not modified
+
+    def test_solve_returns_largest_feasible_step(self):
+        spouse = parse(copy.deepcopy(EXAMPLE))
+        r = H.solve_posttax(self.you, spouse, self.hh, ignore_inheritance=True)
+        best, nxt = r["best"], r["next"]
+        self.assertGreaterEqual(best["posttax_percent"], 0)
+        if nxt:
+            self.assertGreater(nxt["unfunded"], best["unfunded"] + 0.5)
+        # brute-force check: nothing above best is feasible
+        base_unfunded = None
+        for k in range(0, 91):
+            raw = copy.deepcopy(self.you)
+            raw["what_if"] = {"effective_date": "2026-07-10", "pretax_percent": 10, "posttax_percent": k}
+            hh0 = H.replace(self.hh, inheritance_balance=0.0, inheritance_monthly=0.0)
+            sc = H.analyze(parse(raw)).what_if
+            t = H._run(sc, getattr(H.analyze(spouse), "current"), hh0, 7)["totals"]
+            if base_unfunded is None:
+                base_unfunded = t["unfunded"]
+            if k > best["posttax_percent"]:
+                self.assertGreater(t["unfunded"], base_unfunded + 0.5, k)
+
+    def test_solve_reports_smallest_percent_that_fills_the_415c_limit(self):
+        from paycalc import data
+        from paycalc.simulate import additions_cap
+        cap = additions_cap(parse(self.you), data.federal(2026))
+        r = H.solve_posttax(self.you, parse(copy.deepcopy(EXAMPLE)), self.hh, ignore_inheritance=True)
+        nl = r["needed_for_limit"]
+        if nl:
+            self.assertLessEqual(nl["posttax_percent"], r["best"]["posttax_percent"])
+            self.assertGreaterEqual(nl["total_additions"], cap - 0.5)
+            k = int(nl["posttax_percent"])
+            if k > 0:
+                raw = copy.deepcopy(self.you)
+                raw["what_if"] = {"effective_date": "2026-07-10", "pretax_percent": 10, "posttax_percent": k - 1}
+                self.assertLess(H.analyze(parse(raw)).what_if.result.total_additions, cap - 0.5)
+
+    def test_solve_requires_override(self):
+        hh = H.parse_household({"expenses": []})
+        with self.assertRaises(ConfigError):
+            H.solve_posttax(self.you, parse(copy.deepcopy(EXAMPLE)), hh)
+
+    def test_override_validation(self):
+        for bad in ({"you_override": "x"}, {"you_override": {}}, {"you_override": {"effective_date": "2026-07-10", "pretax_percent": 101}}):
+            with self.assertRaises(ConfigError):
+                H.parse_household(bad)
+        with self.assertRaises(ConfigError):  # date outside the tax year is caught when the config is parsed
+            parse(H.with_override(self.you, H.parse_household(
+                {"you_override": {"effective_date": "2030-01-01", "pretax_percent": 5, "posttax_percent": 5}})))
+
+
 class RouteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -142,6 +206,18 @@ class RouteTest(unittest.TestCase):
         self.assertIn("scenarios", json.loads(raw))
         self.assertTrue((self.main.parent / "household.local.json").exists())
         self.assertFalse(self.main.exists())  # your own inputs are not touched
+
+    def test_solve_route(self):
+        household = {"expenses": [{"name": "x", "monthly": 2000, "account": "joint"}], "start_month": 7,
+                     "you_override": {"effective_date": "2026-07-10", "pretax_percent": 10, "posttax_percent": 10}}
+        st, raw = self.req("POST", "/api/household/solve", {"you": EXAMPLE, "spouse": EXAMPLE, "household": household,
+                                                            "ignore_inheritance": True})
+        self.assertEqual(st, 200)
+        self.assertIn("best", json.loads(raw))
+        household.pop("you_override")
+        self.assertEqual(self.req("POST", "/api/household/solve", {"you": EXAMPLE, "spouse": EXAMPLE, "household": household})[0], 400)
+        self.assertEqual(self.req("POST", "/api/household/solve", {"you": EXAMPLE, "spouse": EXAMPLE, "household": household},
+                                  {"Origin": "http://evil.example"})[0], 403)
 
     def test_bad_input_rejected_without_leaks(self):
         st, raw = self.req("POST", "/api/household/analyze", {"you": EXAMPLE, "spouse": EXAMPLE,

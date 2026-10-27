@@ -7,12 +7,15 @@ maxing out after-tax contributions). Taxes are the payroll withholding from each
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple
 
-from .config import Config, ConfigError
+from .config import Config, ConfigError, parse
 from .engine import Analysis, analyze
+from . import data
 from .report import monthly
+from .simulate import additions_cap
 
 MAX_ITEMS = 60
 SPOUSE_SCENARIOS = ("current", "recommended")
@@ -33,6 +36,9 @@ class Household:
     inheritance_monthly: float                       # applied against the total owed every month
     start_month: Optional[int]                       # None: month after your as-of date, else January
     spouse_scenario: str
+    # Elections to try for you from a date on: (effective_date, pretax %, after-tax %). Shown as its
+    # own scenario and used by solve_posttax. It stands in for the calculator's what-if.
+    you_override: Optional[Tuple[str, float, float]] = None
 
 
 def _num(v, field, lo, hi) -> float:
@@ -74,12 +80,19 @@ def parse_household(raw) -> Household:
     sc = raw.get("spouse_scenario", "current")
     if sc not in SPOUSE_SCENARIOS:
         raise ConfigError("spouse_scenario: 'current' or 'recommended'")
+    ov = raw.get("you_override")
+    override = None
+    if ov is not None:
+        if not isinstance(ov, dict) or not isinstance(ov.get("effective_date"), str) or len(ov["effective_date"]) > 10:
+            raise ConfigError("you_override: needs an effective_date like 2026-11-15")
+        override = (ov["effective_date"], _num(ov.get("pretax_percent", 0), "you_override.pretax_percent", 0, 100),
+                    _num(ov.get("posttax_percent", 0), "you_override.posttax_percent", 0, 100))
     return Household(
         _items(raw.get("expenses"), "expenses"),
         _num(raw.get("split_you_percent", 50), "split_you_percent", 0, 100),
         _num(raw.get("inheritance_balance", 0), "inheritance_balance", 0, 1e9),
         _num(raw.get("inheritance_monthly", 0), "inheritance_monthly", 0, 1e9),
-        start, sc)
+        start, sc, override)
 
 
 def _start_month(cfg: Config, hh: Household) -> int:
@@ -182,7 +195,8 @@ def analyze_household(you_cfg: Config, spouse_cfg: Config, hh: Household) -> dic
     pairs = [("current", "Your current elections", you.current),
              ("recommended", "Your recommended elections", you.recommended)]
     if you.what_if is not None:
-        pairs.append(("what_if", "Your what-if elections", you.what_if))
+        pairs.append(("what_if", "Household what-if" if hh.you_override else "Your what-if elections",
+                      you.what_if))
     for key, label, sc in pairs:
         r = _run(sc, sp_sc, hh, start)
         r.update(key=key, label=label, you_total_additions=sc.result.total_additions,
@@ -202,3 +216,75 @@ def analyze_household(you_cfg: Config, spouse_cfg: Config, hh: Household) -> dic
                             "spouse_scenario": hh.spouse_scenario,
                             "spouse_total_additions": sp_sc.result.total_additions},
                    "scenarios": scenarios, "warnings": warnings})
+
+
+def with_override(you_raw: dict, hh: Household) -> dict:
+    """Your config with the household's trial elections in place of the calculator's what-if."""
+    if hh.you_override is None:
+        return you_raw
+    out = copy.deepcopy(you_raw)
+    d, pre, post = hh.you_override
+    out["what_if"] = {"effective_date": d, "pretax_percent": pre, "posttax_percent": post}
+    return out
+
+
+def solve_posttax(you_raw: dict, spouse_cfg: Config, hh: Household, ignore_inheritance: bool = False) -> dict:
+    """The largest after-tax percent (in plan steps) you can elect from the override's date, with the
+    override's pretax percent, without adding unfunded joint bills or uncovered personal costs
+    beyond what you already have at 0% after-tax. Uses the household's inheritance unless told to ignore it."""
+    if hh.you_override is None:
+        raise ConfigError("you_override: set the date and pretax percent to try first")
+    date_, pre, _ = hh.you_override
+    base_cfg = parse(you_raw)
+    if base_cfg.tax_year != spouse_cfg.tax_year:
+        raise ConfigError("both people must use the same tax_year")
+    h = replace(hh, inheritance_balance=0.0, inheritance_monthly=0.0) if ignore_inheritance else hh
+    sp_sc = getattr(analyze(spouse_cfg), hh.spouse_scenario)
+    start = _start_month(base_cfg, hh)
+    step = base_cfg.recommendation.percent_step
+    top = int((100 - pre) / step + 1e-9)
+    cache = {}
+
+    def trial(k: int) -> dict:
+        if k not in cache:
+            raw = copy.deepcopy(you_raw)
+            raw["what_if"] = {"effective_date": date_, "pretax_percent": pre, "posttax_percent": round(k * step, 6)}
+            sc = analyze(parse(raw)).what_if
+            t = _run(sc, sp_sc, h, start)["totals"]
+            cache[k] = {"posttax_percent": round(k * step, 6), "unfunded": t["unfunded"],
+                        "you_own_shortfall": t["you_own_shortfall"], "inheritance_end": t["inheritance_end"],
+                        "you_to_joint": t["you_from_pay"], "total_additions": sc.result.total_additions,
+                        "limit_reached_on": str(sc.result.limit_reached_on) if sc.result.limit_reached_on else None}
+        return cache[k]
+
+    base = trial(0)
+
+    def ok(k):
+        r = trial(k)
+        return r["unfunded"] <= base["unfunded"] + 0.5 and r["you_own_shortfall"] <= base["you_own_shortfall"] + 0.5
+
+    lo, hi = 0, top
+    while lo < hi:  # more after-tax only lowers take-home, so feasibility is monotone
+        mid = (lo + hi + 1) // 2
+        if ok(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    need = None
+    cap = additions_cap(base_cfg, data.federal(base_cfg.tax_year))
+    if trial(lo)["total_additions"] >= cap - 0.5:  # smallest after-tax % that already fills the 415(c) limit
+        a, z = 0, lo
+        while a < z:
+            mid = (a + z) // 2
+            if trial(mid)["total_additions"] >= cap - 0.5:
+                z = mid
+            else:
+                a = mid + 1
+        need = trial(a)
+    note = None
+    if base["unfunded"] > 0.5:
+        note = (f"Even at 0% after-tax, ${base['unfunded']:,.0f} of joint bills is unfunded, so the answer "
+                "only counts what after-tax adds on top.")
+    return _round({"best": trial(lo), "next": trial(lo + 1) if lo + 1 <= top else None, "needed_for_limit": need,
+                   "step": step, "pretax_percent": pre, "effective_date": date_,
+                   "ignored_inheritance": ignore_inheritance, "note": note})

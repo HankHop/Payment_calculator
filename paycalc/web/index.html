@@ -376,6 +376,10 @@ const TIPS = {
   "h:inheritance_balance": "Total inheritance available as of the start month. The monthly amount below comes out of it, and so does any gap a person's pay cannot cover. The tab shows what is used and what is left.",
   "h:start_month": "First month to plan. Auto starts the month after your as-of date (January if there is none). Earlier months are treated as already paid.",
   "h:spouse_scenario": "Whether your spouse's pay uses their current elections or the recommended ones.",
+  "h:_hasOverride": "Try different pretax and after-tax percentages for yourself, from a date on, without changing your saved inputs. It appears here as 'Household what-if'.",
+  "h:you_override.effective_date": "The first paycheck the new percentages apply to. Payroll often takes about two weeks.",
+  "h:you_override.pretax_percent": "Pretax percent to try from that date on.",
+  "h:you_override.posttax_percent": "After-tax (backdoor Roth) percent to try from that date on.",
   "h:expenses.*.name": "A label only.",
   "h:expenses.*.monthly": "The monthly budget. Only this amount is counted. Spending above a personal budget is not covered by the joint account or the inheritance.",
   "h:inheritance_monthly": "Inheritance put toward the family total every month. It reduces the total owed before the split, so both of you owe less. It cannot exceed the balance available. Any amount a person's pay still cannot cover is also drawn from what is left.",
@@ -682,6 +686,24 @@ function renderHHForm() {
       </div>${e.account && e.account !== "joint" ? hchk(`expenses.${i}.shared`, "Also a family cost: add it to the total owed and credit whoever pays it") : ""}</div>`;
   });
   h += `<button data-hact="add">+ Add a cost</button></div>`;
+  const ov = HH.you_override;
+  h += `<div class="card"><h2>Try your own elections</h2>
+    <label class="check"><input type="checkbox" data-h="_hasOverride" data-t="bool" ${ov ? "checked" : ""}><span>Use different pretax and after-tax percentages for me</span></label>`;
+  if (ov) {
+    h += `<div class="item"><div class="grid2">
+      ${htxt("you_override.effective_date", "First paycheck it applies to").replace('type="text" maxlength="60"', 'type="date"')}
+      ${hnum("you_override.pretax_percent", "Pretax %")}
+      ${hnum("you_override.posttax_percent", "After-tax %")}
+    </div>
+    <div class="hint" style="margin-top:6px">Copy from the calculator:</div>
+    <div>${(HHLAST ? HHLAST.scenarios.filter((x) => x.key !== "what_if") : []).map((x) => `<button data-hcopy="${esc(x.key)}">${esc(x.label.replace("Your ", ""))} (${x.you_pretax_percent}% / ${x.you_posttax_percent}%)</button>`).join(" ") || '<span class="hint">Shown once results load.</span>'}</div></div>
+    <div class="hint">Shown as "Household what-if" and replaces the calculator's what-if here. Your saved inputs are not changed.</div>
+    <h2 style="margin-top:12px">What can I afford after-tax?</h2>
+    <div class="hint" style="margin:0 0 6px">Finds the most after-tax % you can elect from the date above, at the pretax % above, without adding bills the household cannot fund.</div>
+    <label class="check"><input type="checkbox" id="hhignore"><span>Assume the inheritance is gone</span></label>
+    <button id="hhsolve" class="primary">Find the most I can put after-tax</button>`;
+  }
+  h += `</div>`;
   $("hhform").innerHTML = h; applyTips();
 }
 $("hhform").addEventListener("click", (ev) => {
@@ -690,15 +712,31 @@ $("hhform").addEventListener("click", (ev) => {
   else HH.expenses.splice(+b.dataset.i, 1);
   renderHHForm(); scheduleHH();
 });
+function overrideDefaults() {
+  const els = (YOU.contributions && YOU.contributions.elections) || [];
+  const last = els[els.length - 1] || {};
+  const yr = YOU.tax_year || new Date().getFullYear();
+  let d = (YOU.what_if && YOU.what_if.effective_date) || "";
+  if (!d) {
+    const base = YOU.as_of_date ? new Date(YOU.as_of_date) : new Date();
+    base.setDate(base.getDate() + 15); d = base.toISOString().slice(0, 10);
+  }
+  if (+d.slice(0, 4) !== yr) d = yr + "-01-01";
+  return {effective_date: d, pretax_percent: last.pretax_percent ?? 0, posttax_percent: last.posttax_percent ?? 0};
+}
 function onHHEdit(ev) {
   const el = ev.target, p = el.dataset.h; if (!p) return;
+  if (p === "_hasOverride") {
+    if (el.checked) { HH.you_override = overrideDefaults(); HHVIEW = "what_if"; } else { delete HH.you_override; if (HHVIEW === "what_if") HHVIEW = "current"; }
+    renderHHForm(); return scheduleHH();
+  }
   setPath(HH, p, convert(el));
   if (p.endsWith(".account")) renderHHForm();
   scheduleHH();
 }
 $("hhform").addEventListener("input", onHHEdit);
 $("hhform").addEventListener("change", onHHEdit);
-function scheduleHH() { clearTimeout(HHTIMER); $("status").textContent = "Calculating…"; HHTIMER = setTimeout(calcHH, 350); }
+function scheduleHH() { SOLVE = null; clearTimeout(HHTIMER); $("status").textContent = "Calculating…"; HHTIMER = setTimeout(calcHH, 350); }
 async function calcHH() {
   if (TAB !== "hh") return;
   const my = ++HHSEQ;
@@ -715,6 +753,37 @@ async function calcHH() {
     if (my !== HHSEQ) return;
     $("hhresults").innerHTML = `<div class="error">Could not reach the calculator.</div>`; $("status").textContent = "Needs attention";
   }
+}
+$("hhform").addEventListener("click", async (ev) => {
+  const c = ev.target.closest("button[data-hcopy]");
+  if (c && HHLAST && HH.you_override) {
+    const x = HHLAST.scenarios.find((y) => y.key === c.dataset.hcopy);
+    if (x) { HH.you_override.pretax_percent = x.you_pretax_percent; HH.you_override.posttax_percent = x.you_posttax_percent; renderHHForm(); scheduleHH(); }
+    return;
+  }
+  if (ev.target.id !== "hhsolve") return;
+  const copy = (o) => clean(JSON.parse(JSON.stringify(o)));
+  const box = $("hhsolveout") || (() => { const d = document.createElement("div"); d.id = "hhsolveout"; $("hhresults").prepend(d); return d; })();
+  box.innerHTML = `<div class="notice">Working...</div>`;
+  try {
+    const res = await fetch("/api/household/solve", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({you: copy(YOU), spouse: copy(SPOUSE), household: copy(HH), ignore_inheritance: $("hhignore").checked})});
+    const d = await res.json();
+    if (!res.ok) { box.innerHTML = `<div class="error">${esc(d.error || "Could not calculate")}</div>`; return; }
+    SOLVE = d; renderSolve();
+  } catch (e) { box.innerHTML = `<div class="error">Could not reach the calculator.</div>`; }
+});
+let SOLVE = null;
+function renderSolve() {
+  if (!SOLVE) return;
+  const d = SOLVE, b = d.best, n = d.next, nl = d.needed_for_limit;
+  const box = $("hhsolveout") || (() => { const x = document.createElement("div"); x.id = "hhsolveout"; $("hhresults").prepend(x); return x; })();
+  box.innerHTML = `<div class="card"><h2>Most I can put after-tax</h2>
+    <div class="stats"><div class="stat"><div class="k">After-tax %</div><div class="v">${b.posttax_percent}%</div><div class="s">with ${d.pretax_percent}% pretax from ${esc(d.effective_date)}${d.ignored_inheritance ? ", no inheritance" : ""}</div></div>
+    <div class="stat"><div class="k">Your total additions</div><div class="v">${money(b.total_additions, 0)}</div><div class="s">${b.limit_reached_on ? "limit reached " + esc(b.limit_reached_on) : "limit not reached"}</div></div>
+    <div class="stat"><div class="k">You send to joint</div><div class="v">${money(b.you_to_joint, 0)}</div><div class="s">over the rest of the year</div></div></div>
+    ${nl && nl.posttax_percent < b.posttax_percent ? `<div class="notice">Only ${nl.posttax_percent}% after-tax is needed to reach the limit (${esc(nl.limit_reached_on)}). Anything above that adds nothing this year.</div>` : ""}
+    <div class="foot">${n ? `One step higher (${n.posttax_percent}%) would leave ${money(n.unfunded, 0)} of joint bills unfunded${n.you_own_shortfall > b.you_own_shortfall + 0.5 ? " and your own costs uncovered" : ""}.` : "This is the highest after-tax % available."} Step size is the plan percent step (${d.step}%).${d.note ? " " + esc(d.note) : ""}</div></div>`;
 }
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-hview]"); if (!b) return;
@@ -739,7 +808,8 @@ function renderHH() {
   h += `<div class="card"><h2>${esc(sc.label)}, month by month</h2><div class="tablewrap"><table><thead><tr><th>Month</th><th>Total family cost</th><th>Inheritance offset</th><th>You owe</th><th>Your net pay</th><th>Your own costs</th><th>You send</th><th>Your gap</th><th>Spouse owes</th><th>Spouse net pay</th><th>Spouse's own costs</th><th>Spouse sends</th><th>Spouse gap</th><th>Inheritance for gaps</th><th>Inheritance left</th><th>Unfunded</th></tr></thead><tbody>` +
     sc.months.map((r) => `<tr><td>${MN[r.month]}</td><td>${money(r.total_cost, 0)}</td><td>${money(r.inheritance_planned, 0)}</td><td>${money(r.you_share, 0)}</td><td>${money(r.you_net, 0)}</td><td class="${r.you_own_shortfall > 0.005 ? "bad" : ""}">${money(r.you_family_expenses, 0)}</td><td>${money(r.you_to_joint, 0)}</td><td>${money(r.you_shortfall, 0)}</td><td>${money(r.spouse_share, 0)}</td><td>${money(r.spouse_net, 0)}</td><td class="${r.spouse_own_shortfall > 0.005 ? "bad" : ""}">${money(r.spouse_family_expenses, 0)}</td><td>${money(r.spouse_to_joint, 0)}</td><td>${money(r.spouse_shortfall, 0)}</td><td>${money(r.inheritance_gap, 0)}</td><td>${money(r.inheritance_balance, 0)}</td><td class="${r.unfunded > 0.005 ? "bad" : ""}">${money(r.unfunded, 0)}</td></tr>`).join("") +
     `</tbody></table></div><div class="foot">Net pay is cash after payroll withholding. Total family cost is the joint bills plus shared costs paid from personal accounts; the inheritance offset comes off it, the rest is split, and whoever paid a shared cost is credited. "Gap" is what a person owes but their pay cannot cover; the remaining inheritance covers it. Own costs shown in red are more than that person's pay can cover and are not paid from the joint account or inheritance.</div></div>`;
-  $("hhresults").innerHTML = h;
+  $("hhresults").innerHTML = (SOLVE ? '<div id="hhsolveout"></div>' : "") + h;
+  renderSolve();
 }
 
 (async function init() {

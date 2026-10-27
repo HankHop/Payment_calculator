@@ -159,8 +159,16 @@ def make_handler(main_path: Path):
                     for k in ("you", "spouse", "household"):
                         if not isinstance(raw.get(k), dict):
                             raise ConfigError(f"{k}: missing")
+                    hh = household.parse_household(raw["household"])
                     return self._json(200, household.analyze_household(
-                        parse(raw["you"]), parse(raw["spouse"]), household.parse_household(raw["household"])))
+                        parse(household.with_override(raw["you"], hh)), parse(raw["spouse"]), hh))
+                if path == "/api/household/solve":
+                    for k in ("you", "spouse", "household"):
+                        if not isinstance(raw.get(k), dict):
+                            raise ConfigError(f"{k}: missing")
+                    return self._json(200, household.solve_posttax(
+                        raw["you"], parse(raw["spouse"]), household.parse_household(raw["household"]),
+                        raw.get("ignore_inheritance") is True))
                 if path == "/api/household/save":
                     if not isinstance(raw.get("household"), dict):
                         raise ConfigError("household: missing")
