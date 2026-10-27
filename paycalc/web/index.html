@@ -85,7 +85,7 @@ details > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
 <body>
 <header>
   <h1>Paycheck Calculator</h1>
-  <nav class="seg" id="tabs"><button data-tab="calc" class="on">Calculator</button><button data-tab="hh">Household</button></nav>
+  <nav class="seg" id="tabs"><button data-tab="calc" class="on">Calculator</button><button data-tab="hh">Household</button><button data-tab="rt">Retirement</button></nav>
   <div class="status" id="status">Loading…</div>
   <div id="calcbar">
     <label for="who" class="status">Person</label>
@@ -97,6 +97,7 @@ details > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
     <button id="save" class="primary">Save inputs</button>
   </div>
   <div id="hhbar" hidden><button id="hhsave" class="primary">Save household</button></div>
+  <div id="rtbar" hidden><button id="rtsave" class="primary">Save retirement plan</button></div>
 </header>
 <div id="banner" class="banner" hidden></div>
 <div class="layout" id="calcview">
@@ -106,6 +107,10 @@ details > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
 <div class="layout" id="hhview" hidden>
   <div id="hhform"></div>
   <div id="hhresults"></div>
+</div>
+<div class="layout" id="rtview" hidden>
+  <div id="rtform"></div>
+  <div id="rtresults"></div>
 </div>
 <div id="toast" role="status"></div>
 
@@ -385,13 +390,44 @@ const TIPS = {
   "h:inheritance_monthly": "Inheritance put toward the family total every month. It reduces the total owed before the split, so both of you owe less. It cannot exceed the balance available. Any amount a person's pay still cannot cover is also drawn from what is left.",
   "h:expenses.*.shared": "For a cost paid from a personal account that is really a family cost (for example baby clothes). It is added to the total owed, split by your share, and whoever paid it is credited the amount they already paid.",
   "h:expenses.*.account": "Where it is paid from. Joint: part of the total owed, split by your share, funded by each person's pay and the inheritance. A personal account: paid from that person's own pay only; tick the family-cost box if it should also count toward the total owed.",
+  "r:you_age": "Your age today. The projection runs one year at a time from here.",
+  "r:spouse_age": "Your spouse's age today. Leave empty to plan without a spouse; the spouse sections then disappear.",
+  "r:target_retire_age": "The age of yours you are testing for full retirement. 'Savings at' and 'Needed' in the results are measured at this age, and the part-time income needed starts here.",
+  "r:end_age": "How long the money has to last, as your age. A later age is more conservative.",
+  "r:real_return_percent": "Investment return after inflation, so everything stays in today's dollars. Higher makes every scenario look better. Many planners use 3 to 5 for a stock-heavy mix. Changing it by 1 point moves long projections a lot.",
+  "r:salary_growth_percent": "Yearly raise above inflation. 0 keeps your salary flat in today's dollars, which is the cautious choice given your concern about income dropping.",
+  "r:swr_percent": "Share of savings you expect to spend each year in retirement. 4 is the common rule of thumb. A lower number raises the savings 'needed' and the coast number.",
+  "r:barista_until_age": "The last age (exclusive) of the part-time income used to find 'part-time income needed'. After this age only savings and Social Security pay for spending.",
+  "r:tax_earned_percent": "One effective tax rate on salary, used to turn salary into spendable cash. A rough stand-in, not a tax calculation. Higher means less left to spend or save.",
+  "r:tax_pretax_withdraw_percent": "Effective tax on money taken from pretax accounts. Withdrawals are grossed up so you still receive the spending amount. Roth and taxable withdrawals are not taxed here.",
+  "r:elective_limit": "Most you can put in pretax per person each year, held constant in today's dollars. Caps the pretax % in each step.",
+  "r:additions_limit": "Most that can go into a person's 401(k) in a year counting employer money, held constant in today's dollars. Caps the after-tax % in each step.",
+  "r:invest_surplus": "If your take-home covers spending with money left over, the extra goes into a taxable account. Turn off to assume it is spent.",
+  "r:accounts.*.name": "A label only.",
+  "r:accounts.*.type": "Pretax: taxed when withdrawn. Roth / after-tax: not taxed on withdrawal here. Taxable / cash: spent first, no tax modeled. The order money is used is taxable, then pretax, then Roth.",
+  "r:accounts.*.balance": "Current balance in today's dollars. Include both of your accounts and your spouse's.",
+  "r:spending.*.age": "From this age of yours, this yearly amount applies until the next change.",
+  "r:spending.*.annual": "Yearly spending in today's dollars, including taxes outside the rates above. This is what the money has to cover.",
+  "r:person.stop_age": "The age this person stops earning and saving. Scenarios can override it.",
+  "r:person.ss_annual": "Expected yearly Social Security after tax, in today's dollars. Leave 0 to ignore it, which is the cautious choice.",
+  "r:person.ss_claim_age": "Age Social Security starts for this person.",
+  "r:person.steps.*.age": "This step starts at this person's own age and holds until the next step.",
+  "r:person.steps.*.salary": "Gross yearly salary in today's dollars while this step is in effect. Use a lower number to model a pay cut or part-time work.",
+  "r:person.steps.*.pretax_percent": "Percent of salary put in pretax, up to the pretax limit.",
+  "r:person.steps.*.posttax_percent": "Percent of salary put in after-tax or Roth, up to the total additions limit.",
+  "r:person.steps.*.employer_percent": "Employer match and unmatched contributions as a percent of salary. They go in the pretax bucket.",
+  "r:person.steps.*.other_savings": "Yearly saving outside the 401(k), in today's dollars, into a taxable account.",
+  "r:scenarios.*.name": "A label for this what-if, such as Layoff at 40 or Barista FIRE.",
+  "r:scenarios.*.spending.*.age": "From this age of yours, spending changes to the amount beside it.",
+  "r:scenarios.*.spending.*.annual": "Yearly spending in today's dollars for this scenario from that age.",
   "act:raise-mode": "Enter the raise as a percent or as the new salary.",
   "act:bonus-mode": "Enter the bonus in dollars or as a percent of salary."
 };
 function applyTips() {
-  document.querySelectorAll("#form [data-p], #form [data-act], #hhform [data-h]").forEach((el) => {
+  document.querySelectorAll("#form [data-p], #form [data-act], #hhform [data-h], #rtform [data-r]").forEach((el) => {
     const norm = (x) => x.replace(/\.\d+(?=\.|$)/g, ".*");
-    const key = el.dataset.h ? "h:" + norm(el.dataset.h) : el.dataset.p ? norm(el.dataset.p) : "act:" + el.dataset.act;
+    const rnorm = (x) => norm(x).replace(/^(scenarios\.\*\.)?(you|spouse)\./, "person.");
+    const key = el.dataset.r ? "r:" + rnorm(el.dataset.r) : el.dataset.h ? "h:" + norm(el.dataset.h) : el.dataset.p ? norm(el.dataset.p) : "act:" + el.dataset.act;
     const tip = TIPS[key];
     const lab = el.closest("label");
     if (tip && lab) lab.title = tip;
@@ -563,7 +599,7 @@ let YOU_BANNER = "";
 function applyBanner() {
   const b = $("banner");
   let text = YOU_BANNER;
-  if (TAB === "hh") text = "";
+  if (TAB !== "calc") text = "";
   else if (WHO === "spouse") text = "Editing your spouse's inputs. They are saved with the household to " + HHPATH + "." +
     (SPOUSE_NEW ? " Started as a copy of your inputs: replace them with your spouse's numbers." : "");
   b.hidden = !text; b.textContent = text;
@@ -630,10 +666,11 @@ $("who").addEventListener("change", () => setWho($("who").value));
 function setTab(t) {
   TAB = t;
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-  $("calcview").hidden = t !== "calc"; $("hhview").hidden = t !== "hh";
-  $("calcbar").hidden = t !== "calc"; $("hhbar").hidden = t !== "hh";
+  $("calcview").hidden = t !== "calc"; $("hhview").hidden = t !== "hh"; $("rtview").hidden = t !== "rt";
+  $("calcbar").hidden = t !== "calc"; $("hhbar").hidden = t !== "hh"; $("rtbar").hidden = t !== "rt";
   applyBanner();
   if (t === "hh") { renderHHForm(); calcHH(); }
+  if (t === "rt") { renderRTForm(); calcRT(); }
 }
 $("tabs").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-tab]"); if (b) setTab(b.dataset.tab); });
 
@@ -812,11 +849,188 @@ function renderHH() {
   renderSolve();
 }
 
+// ---- retirement --------------------------------------------------------------------
+let RT = null, RTPATH = "", RTSEQ = 0, RTTIMER = null, RTLAST = null, RTVIEW = 0;
+const RT_COLORS = ["#1f5fbf", "#d1495b", "#2a9d8f", "#c47f00", "#7b4fb5", "#555555", "#00798c", "#9c6644", "#6a994e"];
+const newStep = (age) => ({age: age ?? "", salary: "", pretax_percent: 0, posttax_percent: 0, employer_percent: 0, other_savings: 0});
+function rtDefaults() {
+  return {you_age: 33, end_age: 95, target_retire_age: 55, real_return_percent: 4, salary_growth_percent: 0, swr_percent: 4,
+    tax_earned_percent: 20, tax_pretax_withdraw_percent: 15, elective_limit: 24500, additions_limit: 72000,
+    barista_until_age: 65, invest_surplus: true, accounts: [], spending: [{age: 33, annual: ""}],
+    you: {stop_age: 55, ss_claim_age: 67, ss_annual: 0, steps: [newStep(33)]}, spouse: null, scenarios: []};
+}
+function rtNormalize(r) {
+  r = (r && typeof r === "object") ? r : rtDefaults();
+  r.accounts = r.accounts || []; r.spending = r.spending || []; r.scenarios = r.scenarios || [];
+  r.you = r.you || {steps: []}; r.you.steps = r.you.steps || [];
+  if (r.spouse_age != null && r.spouse_age !== "") { r.spouse = r.spouse || {steps: []}; r.spouse.steps = r.spouse.steps || []; }
+  r.scenarios.forEach((sc) => { sc.you = sc.you || {steps: []}; sc.you.steps = sc.you.steps || [];
+    sc.spouse = sc.spouse || {steps: []}; sc.spouse.steps = sc.spouse.steps || []; sc.spending = sc.spending || []; });
+  return r;
+}
+const rval = (p) => { const v = getPath(RT, p); return v == null ? "" : v; };
+function rnum(p, label, hint = "") { return `<label>${label}<input type="number" step="any" data-r="${p}" data-t="num" value="${esc(rval(p))}">${hint ? `<span class="hint" style="display:block">${hint}</span>` : ""}</label>`; }
+function rtxt(p, label) { return `<label>${label}<input type="text" maxlength="60" data-r="${p}" data-t="str" value="${esc(rval(p))}"></label>`; }
+function rchk(p, label) { return `<label class="check"><input type="checkbox" data-r="${p}" data-t="bool" ${getPath(RT, p) ? "checked" : ""}><span>${label}</span></label>`; }
+function rsels(p, label, opts) {
+  const cur = String(rval(p));
+  return `<label>${label}<select data-r="${p}" data-t="str">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+}
+function rList(path, title, itemHTML, kind, addLabel) {
+  const list = getPath(RT, path) || [];
+  return list.map((it, i) => `<div class="item"><div class="head"><span>${esc(title(it, i))}</span><button class="link danger" data-ract="del" data-path="${path}" data-i="${i}">Remove</button></div>${itemHTML(`${path}.${i}`)}</div>`).join("") +
+    `<button data-ract="add" data-path="${path}" data-kind="${kind}">${addLabel}</button>`;
+}
+const stepHTML = (p) => `<div class="grid2">${rnum(p + ".age", "From age")}${rnum(p + ".salary", "Salary (today's $)")}${rnum(p + ".pretax_percent", "Pretax %")}${rnum(p + ".posttax_percent", "After-tax / Roth %")}${rnum(p + ".employer_percent", "Employer %")}${rnum(p + ".other_savings", "Other savings $/yr")}</div>`;
+const stepTitle = (s) => (s.age !== "" && s.age != null ? "From age " + s.age : "New step") + (s.salary !== "" && s.salary != null ? ": " + money(+s.salary, 0) : "");
+function personCard(who, label) {
+  const base = who;
+  let h = `<div class="card"><h2>${label}</h2><div class="grid2">${rnum(base + ".stop_age", "Stop working at age", "Income and saving end at this age")}
+    ${rnum(base + ".ss_annual", "Social Security $/yr", "After-tax, today's dollars")}${rnum(base + ".ss_claim_age", "Claim age")}</div>
+    <div class="hint" style="margin:8px 0 0">Income by age (each step holds until the next):</div>`;
+  h += rList(base + ".steps", stepTitle, stepHTML, "step", "+ Add an income step");
+  h += `<div style="margin-top:6px"><button data-ract="fill" data-who="${who}">Fill first step from my calculator inputs</button></div></div>`;
+  return h;
+}
+function renderRTForm() {
+  RT = rtNormalize(RT);
+  const sp = RT.spouse_age != null && RT.spouse_age !== "";
+  let h = `<div class="card"><h2>Plan</h2><div class="grid2">
+    ${rnum("you_age", "Your age now")}${rnum("spouse_age", "Spouse's age now", "Leave empty to plan without a spouse")}
+    ${rnum("target_retire_age", "Target retirement age (yours)")}${rnum("end_age", "Plan through age (yours)")}
+    ${rnum("real_return_percent", "Real return %", "After inflation")}${rnum("salary_growth_percent", "Real salary growth %", "0 = flat in today's dollars")}
+    ${rnum("swr_percent", "Safe withdrawal rate %")}${rnum("barista_until_age", "Part-time income until age")}
+    ${rnum("tax_earned_percent", "Tax on earned income %", "Effective rate")}${rnum("tax_pretax_withdraw_percent", "Tax on pretax withdrawals %", "Effective rate")}
+    ${rnum("elective_limit", "Employee pretax limit $/yr")}${rnum("additions_limit", "Total additions limit $/yr")}
+  </div>${rchk("invest_surplus", "Invest any cash left after spending (otherwise it is not counted)")}</div>`;
+  h += `<div class="card"><h2>Accounts today</h2>` + rList("accounts", (a) => a.name || "Account",
+    (p) => `<div class="grid2">${rtxt(p + ".name", "Name")}${rnum(p + ".balance", "Balance")}${rsels(p + ".type", "Type", [["pretax", "Pretax (401k, IRA)"], ["roth", "Roth / after-tax"], ["taxable", "Taxable / cash"]])}</div>`,
+    "account", "+ Add an account") + `</div>`;
+  h += `<div class="card"><h2>Yearly spending (today's dollars)</h2><div class="hint" style="margin:0 0 6px">Each amount holds from that age of yours until the next.</div>` +
+    rList("spending", (x) => (x.age !== "" && x.age != null ? "From age " + x.age : "New"), (p) => `<div class="grid2">${rnum(p + ".age", "From your age")}${rnum(p + ".annual", "Spending $/yr")}</div>`, "spend", "+ Add a spending change") + `</div>`;
+  h += personCard("you", "You");
+  if (sp) h += personCard("spouse", "Spouse");
+  h += `<div class="card"><h2>Scenarios</h2><div class="hint" style="margin:0 0 6px">Each scenario replaces your income steps from its first step's age onward (example: one step at age 40 with a lower salary). Everything else comes from the plan above.</div>`;
+  RT.scenarios.forEach((sc, i) => {
+    const b = `scenarios.${i}`;
+    h += `<div class="item"><div class="head"><span>${esc(sc.name || "Scenario " + (i + 1))}</span><button class="link danger" data-ract="del" data-path="scenarios" data-i="${i}">Remove</button></div>
+      ${rtxt(b + ".name", "Name (e.g. Layoff at 40, Barista FIRE)")}
+      <div class="hint" style="margin:6px 0 0">Your income from then on:</div>
+      <div class="grid2">${rnum(b + ".you.stop_age", "Stop working at age (optional)")}</div>
+      ${rList(b + ".you.steps", stepTitle, stepHTML, "step", "+ Add a step for you")}
+      ${sp ? `<div class="hint" style="margin:6px 0 0">Spouse's income from then on:</div><div class="grid2">${rnum(b + ".spouse.stop_age", "Stop working at age (optional)")}</div>` + rList(b + ".spouse.steps", stepTitle, stepHTML, "step", "+ Add a step for spouse") : ""}
+      <div class="hint" style="margin:6px 0 0">Spending change (optional):</div>
+      ${rList(b + ".spending", (x) => (x.age !== "" && x.age != null ? "From age " + x.age : "New"), (p) => `<div class="grid2">${rnum(p + ".age", "From your age")}${rnum(p + ".annual", "Spending $/yr")}</div>`, "spend", "+ Add a spending change")}
+    </div>`;
+  });
+  h += `<button data-ract="add" data-path="scenarios" data-kind="scenario">+ Add a scenario</button></div>`;
+  $("rtform").innerHTML = h; applyTips();
+}
+const RT_KINDS = {step: () => newStep(), account: () => ({name: "", type: "pretax", balance: 0}), spend: () => ({age: "", annual: ""}),
+  scenario: () => ({name: "", you: {steps: [newStep()]}, spouse: {steps: []}, spending: []})};
+function fillFromCalc(who) {
+  const c = who === "you" ? YOU : SPOUSE;
+  if (!c) { toast("Set up your spouse on the Calculator tab first"); return; }
+  const els = (c.contributions && c.contributions.elections) || [];
+  const last = els[els.length - 1] || {};
+  let sal = (c.pay && c.pay.base_salary) || 0;
+  const rz = c.pay && c.pay.raise;
+  if (rz) sal = rz.new_salary != null ? rz.new_salary : sal * (1 + (rz.percent || 0) / 100);
+  const e = (c.contributions && c.contributions.employer) || {};
+  const emp = (e.match_rate_percent || 0) / 100 * Math.min(last.pretax_percent || 0, e.match_up_to_percent_of_pay || 0) + (e.nonelective_percent || 0);
+  const age = c.age_end_of_year;
+  RT[who] = RT[who] || {steps: []};
+  const first = {age: age ?? (who === "you" ? RT.you_age : RT.spouse_age) ?? "", salary: Math.round(sal), pretax_percent: last.pretax_percent || 0,
+    posttax_percent: last.posttax_percent || 0, employer_percent: Math.round(emp * 100) / 100, other_savings: 0};
+  RT[who].steps[0] = first;
+  if (who === "you" && age != null) RT.you_age = age;
+  if (who === "spouse" && age != null) RT.spouse_age = age;
+  toast("Filled from your calculator inputs");
+}
+$("rtform").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-ract]"); if (!b) return;
+  const a = b.dataset.ract;
+  if (a === "add") { let l = getPath(RT, b.dataset.path); if (!Array.isArray(l)) { setPath(RT, b.dataset.path, []); l = getPath(RT, b.dataset.path); } l.push(RT_KINDS[b.dataset.kind]()); }
+  else if (a === "del") getPath(RT, b.dataset.path).splice(+b.dataset.i, 1);
+  else if (a === "fill") fillFromCalc(b.dataset.who);
+  renderRTForm(); scheduleRT();
+});
+function onRTEdit(ev) {
+  const el = ev.target, p = el.dataset.r; if (!p) return;
+  setPath(RT, p, convert(el));
+  if (p === "spouse_age") renderRTForm();
+  scheduleRT();
+}
+$("rtform").addEventListener("input", onRTEdit);
+$("rtform").addEventListener("change", onRTEdit);
+function scheduleRT() { clearTimeout(RTTIMER); $("status").textContent = "Calculating..."; RTTIMER = setTimeout(calcRT, 400); }
+const rtBody = () => clean(JSON.parse(JSON.stringify(RT)));
+async function calcRT() {
+  if (TAB !== "rt") return;
+  const my = ++RTSEQ;
+  try {
+    const res = await fetch("/api/retirement/analyze", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(rtBody())});
+    const d = await res.json();
+    if (my !== RTSEQ) return;
+    if (!res.ok) { $("rtresults").innerHTML = `<div class="error">${esc(d.error || "Could not calculate")}</div>`; $("status").textContent = "Needs attention"; return; }
+    RTLAST = d; $("status").textContent = "Up to date"; renderRT();
+  } catch (e) { if (my === RTSEQ) { $("rtresults").innerHTML = `<div class="error">Could not reach the calculator.</div>`; $("status").textContent = "Needs attention"; } }
+}
+async function saveRT() {
+  const res = await fetch("/api/retirement/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(rtBody())});
+  const d = await res.json();
+  toast(res.ok ? "Saved to " + d.saved : (d.error || "Could not save"));
+}
+$("rtsave").addEventListener("click", saveRT);
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-rview]"); if (!b) return;
+  RTVIEW = +b.dataset.rview; renderRT();
+});
+const short$ = (n) => { const a = Math.abs(n); return (n < 0 ? "-" : "") + "$" + (a >= 1e6 ? (a / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M" : a >= 1e3 ? Math.round(a / 1e3) + "K" : Math.round(a)); };
+function rtChart(d) {
+  const W = 760, H = 300, L = 56, R = 12, T = 12, B = 30;
+  const all = d.scenarios.flatMap((s) => s.rows);
+  const xmin = Math.min(...all.map((r) => r.age)), xmax = Math.max(...all.map((r) => r.age));
+  const rawMax = Math.max(1, ...all.map((r) => r.balance));
+  const mag = Math.pow(10, Math.floor(Math.log10(rawMax)));
+  const ymax = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((v) => v >= rawMax) || rawMax;
+  const X = (a) => L + (a - xmin) / Math.max(1, xmax - xmin) * (W - L - R);
+  const Y = (v) => T + (1 - v / ymax) * (H - T - B);
+  let g = "";
+  for (let i = 0; i <= 4; i++) { const v = ymax * i / 4; g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#dfe3e8"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="#5d6b7b">${short$(v)}</text>`; }
+  for (let a = Math.ceil(xmin / 5) * 5; a <= xmax; a += 5) g += `<text x="${X(a)}" y="${H - 10}" text-anchor="middle" font-size="11" fill="#5d6b7b">${a}</text>`;
+  const t = d.meta.target_retire_age;
+  g += `<line x1="${X(t)}" x2="${X(t)}" y1="${T}" y2="${H - B}" stroke="#5d6b7b" stroke-dasharray="4 3"/><text x="${X(t) + 4}" y="${H - B - 6}" font-size="11" fill="#5d6b7b">target ${t}</text>`;
+  d.scenarios.forEach((s, i) => {
+    g += `<polyline fill="none" stroke="${RT_COLORS[i % RT_COLORS.length]}" stroke-width="2" points="${s.rows.map((r) => X(r.age).toFixed(1) + "," + Y(r.balance).toFixed(1)).join(" ")}"/>`;
+  });
+  const legend = d.scenarios.map((s, i) => `<span style="margin-right:14px"><span style="display:inline-block;width:12px;height:3px;background:${RT_COLORS[i % RT_COLORS.length]};vertical-align:middle;margin-right:4px"></span>${esc(s.name)}</span>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Projected savings by age, one line per scenario">${g}</svg><div class="foot">${legend}</div>`;
+}
+function renderRT() {
+  const d = RTLAST; if (!d) return;
+  const m = d.meta;
+  const sc = d.scenarios[Math.min(RTVIEW, d.scenarios.length - 1)];
+  let h = "";
+  if (d.warnings.length) h += `<div class="notice"><ul class="warnlist">${d.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`;
+  h += `<div class="card"><h2>Savings by age (today's dollars)</h2>${rtChart(d)}</div>`;
+  h += `<div class="card"><h2>Scenarios</h2><div class="tablewrap"><table><thead><tr><th>Scenario</th><th>Savings at ${m.target_retire_age}</th><th>Needed (spending / ${m.swr_percent}%)</th><th>Funded</th><th>Coast age</th><th>Money lasts</th><th>Left at ${m.end_age}</th><th>Part-time income needed</th></tr></thead><tbody>` +
+    d.scenarios.map((s) => { const x = s.metrics; return `<tr><td>${esc(s.name)}</td><td>${money(x.balance_at_target, 0)}</td><td>${money(x.fire_number, 0)}</td><td>${x.funded_percent == null ? "-" : Math.round(x.funded_percent) + "%"}</td><td>${x.coast_age == null ? "not yet" : x.coast_age}</td><td class="${x.depletion_age != null ? "bad" : ""}">${x.depletion_age != null ? "runs out at " + x.depletion_age : "past " + m.end_age}</td><td>${money(x.ending_balance, 0)}</td><td>${x.barista_income_needed == null ? "more than spending" : money(x.barista_income_needed, 0) + "/yr"}</td></tr>`; }).join("") +
+    `</tbody></table></div><div class="foot">Coast age: the first age at which your savings, left alone to grow at the real return, reach what you need by ${m.target_retire_age}. Part-time income needed: the smallest after-tax yearly income from ${m.target_retire_age} to the cutoff age that keeps the money lasting.</div></div>`;
+  h += `<div class="seg">${d.scenarios.map((s, i) => `<button data-rview="${i}" class="${s === sc ? "on" : ""}">${esc(s.name)}</button>`).join("")}</div>`;
+  h += `<div class="card"><h2>${esc(sc.name)}, year by year</h2><details><summary>Show the table</summary><div class="tablewrap"><table><thead><tr><th>Your age</th>${m.spouse ? "<th>Spouse</th>" : ""}<th>Income</th><th>Saved</th><th>Spending</th><th>Social Security</th><th>Withdrawn</th><th>Unmet</th><th>Savings (year end)</th></tr></thead><tbody>` +
+    sc.rows.map((r) => `<tr><td>${r.age}</td>${m.spouse ? `<td>${r.spouse_age}</td>` : ""}<td>${money(r.income, 0)}</td><td>${money(r.contributions, 0)}</td><td>${money(r.spending, 0)}</td><td>${money(r.social_security, 0)}</td><td>${money(r.withdrawal, 0)}</td><td class="${r.shortfall > 0.5 ? "bad" : ""}">${money(r.shortfall, 0)}</td><td>${money(r.balance, 0)}</td></tr>`).join("") +
+    `</tbody></table></div></details></div>`;
+  $("rtresults").innerHTML = h;
+}
+
 (async function init() {
   META = await (await fetch("/api/meta")).json();
   await loadPlans("main"); await loadConfig();
   const hd = await (await fetch("/api/household")).json();
   HH = hhNormalize(hd.household); SPOUSE = hd.spouse; HHPATH = hd.path || "";
+  const rd = await (await fetch("/api/retirement")).json();
+  RT = rtNormalize(rd.plan); RTPATH = rd.path || "";
 })();
 </script>
 </body>

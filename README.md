@@ -83,6 +83,18 @@ On the Household tab:
 
 Take-home is cash after payroll withholding, by pay date. Each person's taxes are estimated on their own, so the refund or amount owed on each tab is not your joint return.
 
+## Retirement tab
+
+The Retirement tab projects your household's savings year by year in today's dollars and compares income-reset scenarios, such as a layoff at 40 or a move to part-time work. It saves to `retirement.local.json` next to your main file (git-ignored).
+
+- **Plan:** your and your spouse's ages, target retirement age, how long the money has to last, a real (after-inflation) return, real salary growth (0 by default, so salary stays flat), a safe withdrawal rate, and two effective tax rates (on earned income and on pretax withdrawals). IRS limits are held constant in today's dollars.
+- **Accounts and spending:** balances by type (pretax, Roth/after-tax, taxable) and yearly spending that can change by age. Withdrawals use taxable money first, then pretax (grossed up for the tax rate), then Roth.
+- **Income by age:** for each person, salary steps by age with pretax %, after-tax/Roth %, employer %, other savings, a stop-working age and optional Social Security. "Fill first step from my calculator inputs" copies salary, elections and employer contributions from the Calculator tab.
+- **Scenarios:** each scenario replaces income steps (and optionally stop age or spending) from its first step's age onward; everything else comes from the plan. The Baseline is always shown.
+- **Results:** a savings-by-age chart; per scenario the savings at your target age against what you need (spending / withdrawal rate), the first age you could stop saving and coast, the age the money runs out (if it does), what is left at the end, and the smallest after-tax part-time income from the target age to a cutoff age that makes the money last.
+
+This is a planning sketch: taxes are two flat rates, and early-withdrawal penalties, Roth conversion rules, required distributions, taxable-account gains and sequence-of-returns risk are not modeled.
+
 ## How the recommendation works
 
 Pretax / Roth (elective) money

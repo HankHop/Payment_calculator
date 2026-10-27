@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import data, household, plans, report
+from . import data, household, plans, report, retirement
 from .config import ConfigError, parse
 from .engine import analyze
 
@@ -114,6 +114,10 @@ def make_handler(main_path: Path):
                 saved = json.loads(hpath.read_text()) if hpath.exists() else {}
                 return self._json(200, {"household": saved.get("household"), "spouse": saved.get("spouse"),
                                         "path": str(hpath)})
+            if path == "/api/retirement":
+                rpath = main_path.parent / "retirement.local.json"
+                return self._json(200, {"plan": json.loads(rpath.read_text()) if rpath.exists() else None,
+                                        "path": str(rpath)})
             if path == "/api/plans":
                 return self._json(200, {"plans": plans.list_plans(main_path)})
             if path == "/api/config":
@@ -169,6 +173,13 @@ def make_handler(main_path: Path):
                     return self._json(200, household.solve_posttax(
                         raw["you"], parse(raw["spouse"]), household.parse_household(raw["household"]),
                         raw.get("ignore_inheritance") is True))
+                if path == "/api/retirement/analyze":
+                    return self._json(200, retirement.analyze_plan(retirement.parse_plan(raw)))
+                if path == "/api/retirement/save":
+                    retirement.parse_plan(raw)
+                    rpath = main_path.parent / "retirement.local.json"
+                    _atomic_write(rpath, raw)
+                    return self._json(200, {"saved": str(rpath)})
                 if path == "/api/household/save":
                     if not isinstance(raw.get("household"), dict):
                         raise ConfigError("household: missing")
