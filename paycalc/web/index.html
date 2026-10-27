@@ -36,6 +36,9 @@ button.danger { color: var(--bad); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
 label { display: block; font-size: 12px; color: var(--muted); }
 label[title] { cursor: help; }
+[hidden] { display: none !important; }
+td.bad { color: var(--bad); font-weight: 650; }
+header nav.seg { margin: 0; }
 label > input, label > select { display: block; width: 100%; margin-top: 2px; }
 input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 5px 7px; min-width: 0; }
@@ -82,19 +85,27 @@ details > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
 <body>
 <header>
   <h1>Paycheck Calculator</h1>
+  <nav class="seg" id="tabs"><button data-tab="calc" class="on">Calculator</button><button data-tab="hh">Household</button></nav>
   <div class="status" id="status">Loading…</div>
-  <div>
+  <div id="calcbar">
+    <label for="who" class="status">Person</label>
+    <select id="who" title="Whose inputs and results you are editing. Your spouse's inputs are saved with the household."><option value="you">You</option><option value="spouse">Spouse</option></select>
     <label for="plan" class="status">Plan</label>
     <select id="plan" title="Saved plans. 'main' is your real inputs."></select>
     <button id="rollover" title="Create a new plan for a later year from what is on screen">Plan next year</button>
     <button id="reset" title="Replace the form with the example numbers">Reset to example</button>
     <button id="save" class="primary">Save inputs</button>
   </div>
+  <div id="hhbar" hidden><button id="hhsave" class="primary">Save household</button></div>
 </header>
 <div id="banner" class="banner" hidden></div>
-<div class="layout">
+<div class="layout" id="calcview">
   <div id="form"></div>
   <div id="results"></div>
+</div>
+<div class="layout" id="hhview" hidden>
+  <div id="hhform"></div>
+  <div id="hhresults"></div>
 </div>
 <div id="toast" role="status"></div>
 
@@ -361,12 +372,20 @@ const TIPS = {
   "recommendation.expected_retirement_marginal_rate_percent": "Your guess at your tax rate in retirement. Higher favors pretax, lower favors Roth when splitting your elective money.",
   "recommendation.percent_step": "How coarse the plan's percent choices are. 1 means whole percents only. A larger step gives rougher results and may leave you short of a limit; a smaller step (0.5) lets the recommendation land closer, if your plan allows decimals.",
   "recommendation.plan_max_percent": "The most your plan lets you elect. The recommendation never goes above it, so a low value can leave you short of a limit.",
+  "h:split_you_percent": "Your share of the joint-account bills. The rest is your spouse's. A higher number raises what you need to send each month and lowers your spouse's.",
+  "h:inheritance_balance": "Inheritance money you can put into the joint account, as of the start month. It covers any joint bills a person's pay cannot, and the tab shows how much is used and what is left at year end.",
+  "h:start_month": "First month to plan. Auto starts the month after your as-of date (January if there is none). Earlier months are treated as already paid.",
+  "h:spouse_scenario": "Whether your spouse's pay uses their current elections or the recommended ones.",
+  "h:expenses.*.name": "A label only.",
+  "h:expenses.*.monthly": "The monthly budget. Only this amount is counted. Spending above a personal budget is not covered by the joint account or the inheritance.",
+  "h:expenses.*.account": "Where it is paid from. Joint: split between you by the share above and funded by each person's pay, then the inheritance. My or Spouse's personal account: paid out of that person's own pay only.",
   "act:raise-mode": "Enter the raise as a percent or as the new salary.",
   "act:bonus-mode": "Enter the bonus in dollars or as a percent of salary."
 };
 function applyTips() {
-  document.querySelectorAll("#form [data-p], #form [data-act]").forEach((el) => {
-    const key = el.dataset.p ? el.dataset.p.replace(/\.\d+(?=\.|$)/g, ".*") : "act:" + el.dataset.act;
+  document.querySelectorAll("#form [data-p], #form [data-act], #hhform [data-h]").forEach((el) => {
+    const norm = (x) => x.replace(/\.\d+(?=\.|$)/g, ".*");
+    const key = el.dataset.h ? "h:" + norm(el.dataset.h) : el.dataset.p ? norm(el.dataset.p) : "act:" + el.dataset.act;
     const tip = TIPS[key];
     const lab = el.closest("label");
     if (tip && lab) lab.title = tip;
@@ -519,9 +538,10 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add
 let PLAN = "main";
 const planQ = () => (PLAN === "main" ? "" : "?plan=" + encodeURIComponent(PLAN));
 $("save").addEventListener("click", async () => {
+  if (WHO === "spouse") return saveHousehold();
   const res = await fetch("/api/save" + planQ(), {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload())});
   const d = await res.json();
-  if (res.ok) { DIRTY = false; toast("Saved to " + d.saved); $("banner").hidden = true; } else toast(d.error || "Could not save");
+  if (res.ok) { DIRTY = false; toast("Saved to " + d.saved); YOU_BANNER = ""; applyBanner(); } else toast(d.error || "Could not save");
 });
 async function loadPlans(select) {
   const d = await (await fetch("/api/plans")).json();
@@ -533,17 +553,22 @@ async function loadPlans(select) {
   });
   sel.value = select || PLAN;
 }
+let YOU_BANNER = "";
+function applyBanner() {
+  const b = $("banner");
+  let text = YOU_BANNER;
+  if (TAB === "hh") text = "";
+  else if (WHO === "spouse") text = "Editing your spouse's inputs. They are saved with the household to " + HHPATH + "." +
+    (SPOUSE_NEW ? " Started as a copy of your inputs: replace them with your spouse's numbers." : "");
+  b.hidden = !text; b.textContent = text;
+}
 async function loadConfig() {
   const c = await (await fetch("/api/config" + planQ())).json();
-  S = c.config; EXAMPLE = c.example; DIRTY = false;
-  const b = $("banner");
-  if (c.source === "example") {
-    b.hidden = false;
-    b.textContent = "These are example numbers, not yours. Replace them, then press Save inputs (saved to " + c.path + ").";
-  } else if (PLAN !== "main") {
-    b.hidden = false;
-    b.textContent = "Plan '" + PLAN + "': changes here are saved to " + c.path + " and never touch your main inputs.";
-  } else b.hidden = true;
+  S = c.config; YOU = S; EXAMPLE = c.example; DIRTY = false;
+  if (c.source === "example") YOU_BANNER = "These are example numbers, not yours. Replace them, then press Save inputs (saved to " + c.path + ").";
+  else if (PLAN !== "main") YOU_BANNER = "Plan '" + PLAN + "': changes here are saved to " + c.path + " and never touch your main inputs.";
+  else YOU_BANNER = "";
+  applyBanner();
   ensure(); renderForm(); calc();
 }
 $("plan").addEventListener("change", async () => {
@@ -563,11 +588,156 @@ $("rollover").addEventListener("click", async () => {
 $("reset").addEventListener("click", () => {
   if (!EXAMPLE) return;
   if (!confirm("Replace the form with the example numbers? Your saved file is not changed until you press Save.")) return;
-  S = JSON.parse(JSON.stringify(EXAMPLE)); ensure(); renderForm(); schedule();
+  S = JSON.parse(JSON.stringify(EXAMPLE)); YOU = S; ensure(); renderForm(); schedule();
 });
+
+// ---- person switch and household ---------------------------------------------------
+let TAB = "calc", WHO = "you", YOU = null, SPOUSE = null, SPOUSE_NEW = false, HH = null, HHPATH = "";
+let HHSEQ = 0, HHTIMER = null, HHLAST = null, HHVIEW = "current";
+const MN = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function hhNormalize(h) {
+  h = (h && typeof h === "object") ? h : {};
+  h.expenses = Array.isArray(h.expenses) ? h.expenses : [];
+  if (h.split_you_percent == null) h.split_you_percent = 50;
+  if (h.inheritance_balance == null) h.inheritance_balance = 0;
+  if (!h.spouse_scenario) h.spouse_scenario = "current";
+  return h;
+}
+function spouseDefault() {
+  const c = JSON.parse(JSON.stringify(YOU));
+  delete c.as_of_date; delete c.what_if;
+  if (c.pay) { delete c.pay.raise; c.pay.bonuses = []; delete c.pay.bonus; }
+  if (c.withholding) c.withholding.changes = [];
+  return c;
+}
+function setWho(w) {
+  WHO = w;
+  if (w === "spouse" && !SPOUSE) { SPOUSE = spouseDefault(); SPOUSE_NEW = true; }
+  S = w === "you" ? YOU : SPOUSE;
+  $("who").value = w;
+  $("plan").disabled = $("rollover").disabled = $("reset").disabled = w === "spouse";
+  $("save").textContent = w === "spouse" ? "Save household" : "Save inputs";
+  applyBanner(); ensure(); renderForm(); LAST = null; calc();
+}
+$("who").addEventListener("change", () => setWho($("who").value));
+function setTab(t) {
+  TAB = t;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
+  $("calcview").hidden = t !== "calc"; $("hhview").hidden = t !== "hh";
+  $("calcbar").hidden = t !== "calc"; $("hhbar").hidden = t !== "hh";
+  applyBanner();
+  if (t === "hh") { renderHHForm(); calcHH(); }
+}
+$("tabs").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-tab]"); if (b) setTab(b.dataset.tab); });
+
+async function saveHousehold() {
+  const body = {household: clean(HH), spouse: SPOUSE ? clean(JSON.parse(JSON.stringify(SPOUSE))) : null};
+  const res = await fetch("/api/household/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const d = await res.json();
+  if (res.ok) { SPOUSE_NEW = false; toast("Saved to " + d.saved); applyBanner(); } else toast(d.error || "Could not save");
+}
+$("hhsave").addEventListener("click", saveHousehold);
+
+const hval = (p) => { const v = getPath(HH, p); return v == null ? "" : v; };
+function hnum(p, label, hint = "") {
+  return `<label>${label}<input type="number" step="any" data-h="${p}" data-t="num" value="${esc(hval(p))}"></label>${hint ? `<div class="hint">${hint}</div>` : ""}`;
+}
+function htxt(p, label) {
+  return `<label>${label}<input type="text" maxlength="60" data-h="${p}" data-t="str" value="${esc(hval(p))}"></label>`;
+}
+function hsel(p, label, opts) {
+  const cur = String(hval(p));
+  return `<label>${label}<select data-h="${p}" data-t="num">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+}
+function hsels(p, label, opts) {
+  const cur = String(hval(p));
+  return `<label>${label}<select data-h="${p}" data-t="str">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+}
+function renderHHForm() {
+  HH = hhNormalize(HH);
+  let h = `<div class="card"><h2>Household</h2>`;
+  h += SPOUSE ? `<div class="hint" style="margin:0 0 6px">Your spouse's pay is set up under Calculator > Person > Spouse.</div>`
+              : `<div class="notice">Your spouse's inputs are not set up yet. Switch Person to Spouse on the Calculator tab and enter their salary and contributions.</div>`;
+  h += `<div class="grid2">
+    ${hnum("split_you_percent", "Your share of joint bills %", "The rest is your spouse's")}
+    ${hnum("inheritance_balance", "Inheritance available", "At the start month below")}
+    ${hsel("start_month", "Start month", [["", "Auto (after as-of date)"], ...MN.slice(1).map((m, i) => [i + 1, m])])}
+    ${hsels("spouse_scenario", "Spouse's contributions", [["current", "Current"], ["recommended", "Recommended"]])}
+  </div></div>`;
+  h += `<div class="card"><h2>Costs and budgets (per month)</h2>
+    <div class="hint" style="margin:0 0 6px">Assign each cost to an account. Only the budgeted amount is counted: spending above a personal budget is not covered by the joint account or the inheritance.</div>`;
+  HH.expenses.forEach((e, i) => {
+    h += `<div class="item"><div class="head"><span>${esc(e.name || "Cost " + (i + 1))}</span><button class="link danger" data-hact="del" data-i="${i}">Remove</button></div>
+      <div class="grid2">
+        ${htxt(`expenses.${i}.name`, "Name (e.g. daughter's clothes)")}
+        ${hnum(`expenses.${i}.monthly`, "Monthly budget")}
+        ${hsels(`expenses.${i}.account`, "Paid from", [["joint", "Joint account"], ["you", "My personal account"], ["spouse", "Spouse's personal account"]])}
+      </div></div>`;
+  });
+  h += `<button data-hact="add">+ Add a cost</button></div>`;
+  $("hhform").innerHTML = h; applyTips();
+}
+$("hhform").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-hact]"); if (!b) return;
+  if (b.dataset.hact === "add") HH.expenses.push({name: "", monthly: 0, account: "joint"});
+  else HH.expenses.splice(+b.dataset.i, 1);
+  renderHHForm(); scheduleHH();
+});
+function onHHEdit(ev) {
+  const el = ev.target, p = el.dataset.h; if (!p) return;
+  setPath(HH, p, convert(el)); scheduleHH();
+}
+$("hhform").addEventListener("input", onHHEdit);
+$("hhform").addEventListener("change", onHHEdit);
+function scheduleHH() { clearTimeout(HHTIMER); $("status").textContent = "Calculating…"; HHTIMER = setTimeout(calcHH, 350); }
+async function calcHH() {
+  if (TAB !== "hh") return;
+  const my = ++HHSEQ;
+  if (!SPOUSE) { $("hhresults").innerHTML = ""; $("status").textContent = "Set up spouse"; return; }
+  try {
+    const copy = (o) => clean(JSON.parse(JSON.stringify(o)));
+    const res = await fetch("/api/household/analyze", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({you: copy(YOU), spouse: copy(SPOUSE), household: copy(HH)})});
+    const d = await res.json();
+    if (my !== HHSEQ) return;
+    if (!res.ok) { $("hhresults").innerHTML = `<div class="error">${esc(d.error || "Could not calculate")}</div>`; $("status").textContent = "Needs attention"; return; }
+    HHLAST = d; $("status").textContent = "Up to date"; renderHH();
+  } catch (e) {
+    if (my !== HHSEQ) return;
+    $("hhresults").innerHTML = `<div class="error">Could not reach the calculator.</div>`; $("status").textContent = "Needs attention";
+  }
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-hview]"); if (!b) return;
+  HHVIEW = b.dataset.hview; renderHH();
+});
+function renderHH() {
+  const d = HHLAST; if (!d) return;
+  const sc = d.scenarios.find((x) => x.key === HHVIEW) || d.scenarios[0];
+  const t = sc.totals, m = d.meta;
+  let h = "";
+  if (d.warnings.length) h += `<div class="notice"><ul class="warnlist">${d.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`;
+  h += `<div class="card"><h2>Scenarios, ${MN[m.start_month]} to Dec</h2><div class="tablewrap"><table><thead><tr><th>Your elections</th><th>Pretax / post-tax</th><th>Your total additions</th><th>Limit reached</th><th>You send to joint</th><th>Spouse sends</th><th>Inheritance used</th><th>Inheritance left</th><th>Unfunded</th></tr></thead><tbody>` +
+    d.scenarios.map((x) => `<tr><td>${esc(x.label)}</td><td>${x.you_pretax_percent}% / ${x.you_posttax_percent}%</td><td>${money(x.you_total_additions, 0)}</td><td>${esc(x.you_limit_reached_on || "-")}</td><td>${money(x.totals.you_from_pay, 0)}</td><td>${money(x.totals.spouse_from_pay, 0)}</td><td>${money(x.totals.inheritance_used, 0)}</td><td>${money(x.totals.inheritance_end, 0)}</td><td class="${x.totals.unfunded > 0.005 ? "bad" : ""}">${money(x.totals.unfunded, 0)}</td></tr>`).join("") +
+    `</tbody></table></div></div>`;
+  h += `<div class="seg">${d.scenarios.map((x) => `<button data-hview="${esc(x.key)}" class="${x.key === sc.key ? "on" : ""}">${esc(x.label)}</button>`).join("")}</div>`;
+  h += `<div class="stats">
+    <div class="stat"><div class="k">You send to joint</div><div class="v">${money(t.you_per_paycheck_avg)}</div><div class="s">per paycheck, average</div></div>
+    <div class="stat"><div class="k">Spouse sends to joint</div><div class="v">${money(t.spouse_per_paycheck_avg)}</div><div class="s">per paycheck, average</div></div>
+    <div class="stat"><div class="k">Inheritance used</div><div class="v">${money(t.inheritance_used, 0)}</div><div class="s">${money(t.inheritance_end, 0)} left at year end</div></div>
+    <div class="stat"><div class="k">Unfunded joint bills</div><div class="v">${money(t.unfunded, 0)}</div><div class="s">after the inheritance runs out</div></div>
+  </div>`;
+  h += `<div class="card"><h2>${esc(sc.label)}, month by month</h2><div class="tablewrap"><table><thead><tr><th>Month</th><th>Joint bills</th><th>Your net pay</th><th>Your own costs</th><th>You send</th><th>Your joint gap</th><th>Spouse net pay</th><th>Spouse's own costs</th><th>Spouse sends</th><th>Spouse joint gap</th><th>Inheritance used</th><th>Inheritance left</th><th>Unfunded</th></tr></thead><tbody>` +
+    sc.months.map((r) => `<tr><td>${MN[r.month]}</td><td>${money(r.joint_expenses, 0)}</td><td>${money(r.you_net, 0)}</td><td class="${r.you_own_shortfall > 0.005 ? "bad" : ""}">${money(r.you_family_expenses, 0)}</td><td>${money(r.you_to_joint, 0)}</td><td>${money(r.you_shortfall, 0)}</td><td>${money(r.spouse_net, 0)}</td><td class="${r.spouse_own_shortfall > 0.005 ? "bad" : ""}">${money(r.spouse_family_expenses, 0)}</td><td>${money(r.spouse_to_joint, 0)}</td><td>${money(r.spouse_shortfall, 0)}</td><td>${money(r.inheritance_used, 0)}</td><td>${money(r.inheritance_balance, 0)}</td><td class="${r.unfunded > 0.005 ? "bad" : ""}">${money(r.unfunded, 0)}</td></tr>`).join("") +
+    `</tbody></table></div><div class="foot">Net pay is cash after payroll withholding. "Joint gap" is the part of a person's share of joint bills that their pay cannot cover; the inheritance covers it. Own costs shown in red are more than that person's pay can cover and are not paid from the joint account or inheritance.</div></div>`;
+  $("hhresults").innerHTML = h;
+}
+
 (async function init() {
   META = await (await fetch("/api/meta")).json();
   await loadPlans("main"); await loadConfig();
+  const hd = await (await fetch("/api/household")).json();
+  HH = hhNormalize(hd.household); SPOUSE = hd.spouse; HHPATH = hd.path || "";
 })();
 </script>
 </body>

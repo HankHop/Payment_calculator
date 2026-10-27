@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import data, plans, report
+from . import data, household, plans, report
 from .config import ConfigError, parse
 from .engine import analyze
 
@@ -109,6 +109,11 @@ def make_handler(main_path: Path):
             path, config_path = route
             if path in ("/", "/index.html"):
                 return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            if path == "/api/household":
+                hpath = main_path.parent / "household.local.json"
+                saved = json.loads(hpath.read_text()) if hpath.exists() else {}
+                return self._json(200, {"household": saved.get("household"), "spouse": saved.get("spouse"),
+                                        "path": str(hpath)})
             if path == "/api/plans":
                 return self._json(200, {"plans": plans.list_plans(main_path)})
             if path == "/api/config":
@@ -150,6 +155,24 @@ def make_handler(main_path: Path):
                     parse(raw)  # refuse to save something that cannot be calculated
                     _atomic_write(config_path, raw)
                     return self._json(200, {"saved": str(config_path)})
+                if path == "/api/household/analyze":
+                    for k in ("you", "spouse", "household"):
+                        if not isinstance(raw.get(k), dict):
+                            raise ConfigError(f"{k}: missing")
+                    return self._json(200, household.analyze_household(
+                        parse(raw["you"]), parse(raw["spouse"]), household.parse_household(raw["household"])))
+                if path == "/api/household/save":
+                    if not isinstance(raw.get("household"), dict):
+                        raise ConfigError("household: missing")
+                    household.parse_household(raw["household"])
+                    spouse = raw.get("spouse")
+                    if spouse is not None:
+                        if not isinstance(spouse, dict):
+                            raise ConfigError("spouse: must be an object")
+                        parse(spouse)
+                    hpath = main_path.parent / "household.local.json"
+                    _atomic_write(hpath, {"household": raw["household"], "spouse": spouse})
+                    return self._json(200, {"saved": str(hpath)})
                 if path == "/api/rollover":
                     # body: {"config": <current form>, "year": 2027, "name": optional}. Writes a NEW plan
                     # file only; the plan it was built from is never touched.

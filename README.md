@@ -67,6 +67,19 @@ The new plan carries forward the salary in force on Dec 31 (the raise is folded 
 
 Years without published figures use the latest available year's limits, brackets and wage base, and the results carry a warning saying so. Real limits are usually a little higher.
 
+## Household tab
+
+The Household tab plans the shared (joint) account for two people. Your spouse is a full second set of inputs: on the Calculator tab set Person to Spouse and enter their salary, elections, deductions and W-4. A new spouse starts as a copy of your inputs. Your spouse and the household settings are saved to `household.local.json` next to your main file (git-ignored); your own inputs are never changed by it.
+
+On the Household tab:
+
+- **Costs and budgets:** each monthly cost is assigned to the joint account, your personal account or your spouse's. Only the budgeted amount counts. Joint costs are split by your share and funded by each person's pay; personal costs come out of that person's own pay, and any amount above what their pay covers is not paid from the joint account or the inheritance.
+- **Inheritance:** a starting balance, drawn as needed to cover the part of a person's share of joint bills their pay cannot (for example, months where your take-home is $0 while you max out after-tax contributions). The tab shows what is used, what is left each month, and any joint bills left unfunded.
+- **Scenarios:** your current, recommended and what-if elections side by side, with your spouse on current or recommended.
+- **Transfers:** what each person sends to the joint account each month, and the average per paycheck.
+
+Take-home is cash after payroll withholding, by pay date. Each person's taxes are estimated on their own, so the refund or amount owed on each tab is not your joint return.
+
 ## How the recommendation works
 
 Pretax / Roth (elective) money
