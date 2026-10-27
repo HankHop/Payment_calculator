@@ -58,6 +58,31 @@ class ModelTest(unittest.TestCase):
         self.assertAlmostEqual(m["you_available"], m["you_net"] - 500, places=1)
         self.assertAlmostEqual(m["spouse_available"], m["spouse_net"] - 300, places=1)
 
+    def test_shared_personal_cost_added_to_total_and_credited_to_payer(self):
+        h = hh(expenses=[{"name": "bills", "monthly": 10000, "account": "joint"},
+                         {"name": "baby clothes", "monthly": 100, "account": "spouse", "shared": True}],
+               inheritance_balance=100000, inheritance_monthly=4000)
+        m = run(h)["scenarios"][-1]["months"][0]
+        self.assertAlmostEqual(m["total_cost"], 10100)
+        self.assertAlmostEqual(m["inheritance_planned"], 4000)
+        self.assertAlmostEqual(m["spouse_share"], 2950)   # half of 6,100 less the 100 she paid
+        self.assertAlmostEqual(m["you_share"], 3050)
+        self.assertAlmostEqual(m["you_share"] + m["spouse_share"], 10000 - 4000)  # joint account gets bills minus offset
+
+    def test_unshared_personal_cost_does_not_change_the_total(self):
+        h = hh(expenses=[{"name": "bills", "monthly": 1000, "account": "joint"},
+                         {"name": "hobby", "monthly": 100, "account": "spouse"}])
+        m = run(h)["scenarios"][-1]["months"][0]
+        self.assertAlmostEqual(m["total_cost"], 1000)
+        self.assertAlmostEqual(m["spouse_share"], 500)
+
+    def test_planned_inheritance_limited_by_balance(self):
+        h = hh(expenses=[{"name": "bills", "monthly": 1000, "account": "joint"}],
+               inheritance_balance=1500, inheritance_monthly=1000, start_month=11)
+        months = run(h)["scenarios"][-1]["months"]
+        self.assertAlmostEqual(months[0]["inheritance_planned"], 1000)
+        self.assertAlmostEqual(months[1]["inheritance_planned"], 500)
+
     def test_tax_year_mismatch_rejected(self):
         sp = copy.deepcopy(EXAMPLE)
         sp["tax_year"] = 2027
@@ -69,7 +94,8 @@ class ModelTest(unittest.TestCase):
     def test_validation(self):
         bad = [{"expenses": [{"name": "x", "monthly": -1}]}, {"expenses": [{"name": "x", "monthly": 5, "account": "bank"}]},
                {"expenses": "nope"}, {"split_you_percent": 101}, {"inheritance_balance": -1}, {"start_month": 13},
-               {"spouse_scenario": "x"}, {"expenses": [{"name": "x" * 61, "monthly": 1}]}, {"expenses": [1]}]
+               {"spouse_scenario": "x"}, {"inheritance_monthly": -5},
+               {"expenses": [{"name": "x", "monthly": 5, "account": "you", "shared": "yes"}]}, {"expenses": [{"name": "x" * 61, "monthly": 1}]}, {"expenses": [1]}]
         for b in bad:
             with self.assertRaises(ConfigError, msg=str(b)):
                 H.parse_household(b)

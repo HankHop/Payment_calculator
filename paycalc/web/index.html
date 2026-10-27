@@ -373,12 +373,14 @@ const TIPS = {
   "recommendation.percent_step": "How coarse the plan's percent choices are. 1 means whole percents only. A larger step gives rougher results and may leave you short of a limit; a smaller step (0.5) lets the recommendation land closer, if your plan allows decimals.",
   "recommendation.plan_max_percent": "The most your plan lets you elect. The recommendation never goes above it, so a low value can leave you short of a limit.",
   "h:split_you_percent": "Your share of the joint-account bills. The rest is your spouse's. A higher number raises what you need to send each month and lowers your spouse's.",
-  "h:inheritance_balance": "Inheritance money you can put into the joint account, as of the start month. It covers any joint bills a person's pay cannot, and the tab shows how much is used and what is left at year end.",
+  "h:inheritance_balance": "Total inheritance available as of the start month. The monthly amount below comes out of it, and so does any gap a person's pay cannot cover. The tab shows what is used and what is left.",
   "h:start_month": "First month to plan. Auto starts the month after your as-of date (January if there is none). Earlier months are treated as already paid.",
   "h:spouse_scenario": "Whether your spouse's pay uses their current elections or the recommended ones.",
   "h:expenses.*.name": "A label only.",
   "h:expenses.*.monthly": "The monthly budget. Only this amount is counted. Spending above a personal budget is not covered by the joint account or the inheritance.",
-  "h:expenses.*.account": "Where it is paid from. Joint: split between you by the share above and funded by each person's pay, then the inheritance. My or Spouse's personal account: paid out of that person's own pay only.",
+  "h:inheritance_monthly": "Inheritance put toward the family total every month. It reduces the total owed before the split, so both of you owe less. It cannot exceed the balance available. Any amount a person's pay still cannot cover is also drawn from what is left.",
+  "h:expenses.*.shared": "For a cost paid from a personal account that is really a family cost (for example baby clothes). It is added to the total owed, split by your share, and whoever paid it is credited the amount they already paid.",
+  "h:expenses.*.account": "Where it is paid from. Joint: part of the total owed, split by your share, funded by each person's pay and the inheritance. A personal account: paid from that person's own pay only; tick the family-cost box if it should also count toward the total owed.",
   "act:raise-mode": "Enter the raise as a percent or as the new salary.",
   "act:bonus-mode": "Enter the bonus in dollars or as a percent of salary."
 };
@@ -600,6 +602,7 @@ function hhNormalize(h) {
   h.expenses = Array.isArray(h.expenses) ? h.expenses : [];
   if (h.split_you_percent == null) h.split_you_percent = 50;
   if (h.inheritance_balance == null) h.inheritance_balance = 0;
+  if (h.inheritance_monthly == null) h.inheritance_monthly = 0;
   if (!h.spouse_scenario) h.spouse_scenario = "current";
   return h;
 }
@@ -645,6 +648,9 @@ function hnum(p, label, hint = "") {
 function htxt(p, label) {
   return `<label>${label}<input type="text" maxlength="60" data-h="${p}" data-t="str" value="${esc(hval(p))}"></label>`;
 }
+function hchk(p, label) {
+  return `<label class="check"><input type="checkbox" data-h="${p}" data-t="bool" ${getPath(HH, p) ? "checked" : ""}><span>${label}</span></label>`;
+}
 function hsel(p, label, opts) {
   const cur = String(hval(p));
   return `<label>${label}<select data-h="${p}" data-t="num">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
@@ -661,6 +667,7 @@ function renderHHForm() {
   h += `<div class="grid2">
     ${hnum("split_you_percent", "Your share of joint bills %", "The rest is your spouse's")}
     ${hnum("inheritance_balance", "Inheritance available", "At the start month below")}
+    ${hnum("inheritance_monthly", "Inheritance applied each month", "Offsets the total owed before it is split")}
     ${hsel("start_month", "Start month", [["", "Auto (after as-of date)"], ...MN.slice(1).map((m, i) => [i + 1, m])])}
     ${hsels("spouse_scenario", "Spouse's contributions", [["current", "Current"], ["recommended", "Recommended"]])}
   </div></div>`;
@@ -672,7 +679,7 @@ function renderHHForm() {
         ${htxt(`expenses.${i}.name`, "Name (e.g. daughter's clothes)")}
         ${hnum(`expenses.${i}.monthly`, "Monthly budget")}
         ${hsels(`expenses.${i}.account`, "Paid from", [["joint", "Joint account"], ["you", "My personal account"], ["spouse", "Spouse's personal account"]])}
-      </div></div>`;
+      </div>${e.account && e.account !== "joint" ? hchk(`expenses.${i}.shared`, "Also a family cost: add it to the total owed and credit whoever pays it") : ""}</div>`;
   });
   h += `<button data-hact="add">+ Add a cost</button></div>`;
   $("hhform").innerHTML = h; applyTips();
@@ -685,7 +692,9 @@ $("hhform").addEventListener("click", (ev) => {
 });
 function onHHEdit(ev) {
   const el = ev.target, p = el.dataset.h; if (!p) return;
-  setPath(HH, p, convert(el)); scheduleHH();
+  setPath(HH, p, convert(el));
+  if (p.endsWith(".account")) renderHHForm();
+  scheduleHH();
 }
 $("hhform").addEventListener("input", onHHEdit);
 $("hhform").addEventListener("change", onHHEdit);
@@ -727,9 +736,9 @@ function renderHH() {
     <div class="stat"><div class="k">Inheritance used</div><div class="v">${money(t.inheritance_used, 0)}</div><div class="s">${money(t.inheritance_end, 0)} left at year end</div></div>
     <div class="stat"><div class="k">Unfunded joint bills</div><div class="v">${money(t.unfunded, 0)}</div><div class="s">after the inheritance runs out</div></div>
   </div>`;
-  h += `<div class="card"><h2>${esc(sc.label)}, month by month</h2><div class="tablewrap"><table><thead><tr><th>Month</th><th>Joint bills</th><th>Your net pay</th><th>Your own costs</th><th>You send</th><th>Your joint gap</th><th>Spouse net pay</th><th>Spouse's own costs</th><th>Spouse sends</th><th>Spouse joint gap</th><th>Inheritance used</th><th>Inheritance left</th><th>Unfunded</th></tr></thead><tbody>` +
-    sc.months.map((r) => `<tr><td>${MN[r.month]}</td><td>${money(r.joint_expenses, 0)}</td><td>${money(r.you_net, 0)}</td><td class="${r.you_own_shortfall > 0.005 ? "bad" : ""}">${money(r.you_family_expenses, 0)}</td><td>${money(r.you_to_joint, 0)}</td><td>${money(r.you_shortfall, 0)}</td><td>${money(r.spouse_net, 0)}</td><td class="${r.spouse_own_shortfall > 0.005 ? "bad" : ""}">${money(r.spouse_family_expenses, 0)}</td><td>${money(r.spouse_to_joint, 0)}</td><td>${money(r.spouse_shortfall, 0)}</td><td>${money(r.inheritance_used, 0)}</td><td>${money(r.inheritance_balance, 0)}</td><td class="${r.unfunded > 0.005 ? "bad" : ""}">${money(r.unfunded, 0)}</td></tr>`).join("") +
-    `</tbody></table></div><div class="foot">Net pay is cash after payroll withholding. "Joint gap" is the part of a person's share of joint bills that their pay cannot cover; the inheritance covers it. Own costs shown in red are more than that person's pay can cover and are not paid from the joint account or inheritance.</div></div>`;
+  h += `<div class="card"><h2>${esc(sc.label)}, month by month</h2><div class="tablewrap"><table><thead><tr><th>Month</th><th>Total family cost</th><th>Inheritance offset</th><th>You owe</th><th>Your net pay</th><th>Your own costs</th><th>You send</th><th>Your gap</th><th>Spouse owes</th><th>Spouse net pay</th><th>Spouse's own costs</th><th>Spouse sends</th><th>Spouse gap</th><th>Inheritance for gaps</th><th>Inheritance left</th><th>Unfunded</th></tr></thead><tbody>` +
+    sc.months.map((r) => `<tr><td>${MN[r.month]}</td><td>${money(r.total_cost, 0)}</td><td>${money(r.inheritance_planned, 0)}</td><td>${money(r.you_share, 0)}</td><td>${money(r.you_net, 0)}</td><td class="${r.you_own_shortfall > 0.005 ? "bad" : ""}">${money(r.you_family_expenses, 0)}</td><td>${money(r.you_to_joint, 0)}</td><td>${money(r.you_shortfall, 0)}</td><td>${money(r.spouse_share, 0)}</td><td>${money(r.spouse_net, 0)}</td><td class="${r.spouse_own_shortfall > 0.005 ? "bad" : ""}">${money(r.spouse_family_expenses, 0)}</td><td>${money(r.spouse_to_joint, 0)}</td><td>${money(r.spouse_shortfall, 0)}</td><td>${money(r.inheritance_gap, 0)}</td><td>${money(r.inheritance_balance, 0)}</td><td class="${r.unfunded > 0.005 ? "bad" : ""}">${money(r.unfunded, 0)}</td></tr>`).join("") +
+    `</tbody></table></div><div class="foot">Net pay is cash after payroll withholding. Total family cost is the joint bills plus shared costs paid from personal accounts; the inheritance offset comes off it, the rest is split, and whoever paid a shared cost is credited. "Gap" is what a person owes but their pay cannot cover; the remaining inheritance covers it. Own costs shown in red are more than that person's pay can cover and are not paid from the joint account or inheritance.</div></div>`;
   $("hhresults").innerHTML = h;
 }
 

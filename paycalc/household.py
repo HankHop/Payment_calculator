@@ -23,11 +23,14 @@ ACCOUNTS = ("you", "spouse", "joint")
 
 @dataclass(frozen=True)
 class Household:
-    # (name, monthly budget, account): account is "you" (your personal account), "spouse" or "joint".
-    # Only the budgeted amount is counted; spending above a personal budget is that person's own.
-    expenses: Tuple[Tuple[str, float, str], ...]
+    # (name, monthly budget, account, shared). account is "you" (your personal account), "spouse" or
+    # "joint". shared: a personal-account cost that is also a family cost (it is added to the total owed
+    # and credited to whoever pays it). Costs on the joint account are always shared. Only the budgeted
+    # amount counts; spending above a personal budget is that person's own.
+    expenses: Tuple[Tuple[str, float, str, bool], ...]
     split_you_percent: float                         # your share of the joint bills
     inheritance_balance: float                       # available at the start of start_month
+    inheritance_monthly: float                       # applied against the total owed every month
     start_month: Optional[int]                       # None: month after your as-of date, else January
     spouse_scenario: str
 
@@ -38,7 +41,7 @@ def _num(v, field, lo, hi) -> float:
     return float(v)
 
 
-def _items(raw, field) -> Tuple[Tuple[str, float, str], ...]:
+def _items(raw, field) -> Tuple[Tuple[str, float, str, bool], ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list) or len(raw) > MAX_ITEMS:
@@ -53,7 +56,11 @@ def _items(raw, field) -> Tuple[Tuple[str, float, str], ...]:
         acct = it.get("account", "joint")
         if acct not in ACCOUNTS:
             raise ConfigError(f"{field}[{i}].account: 'you', 'spouse' or 'joint'")
-        out.append((name, _num(it.get("monthly", 0), f"{field}[{i}].monthly", 0, 1e7), acct))
+        shared = it.get("shared", False)
+        if not isinstance(shared, bool):
+            raise ConfigError(f"{field}[{i}].shared: true or false")
+        out.append((name, _num(it.get("monthly", 0), f"{field}[{i}].monthly", 0, 1e7), acct,
+                    shared or acct == "joint"))
     return tuple(out)
 
 
@@ -71,6 +78,7 @@ def parse_household(raw) -> Household:
         _items(raw.get("expenses"), "expenses"),
         _num(raw.get("split_you_percent", 50), "split_you_percent", 0, 100),
         _num(raw.get("inheritance_balance", 0), "inheritance_balance", 0, 1e9),
+        _num(raw.get("inheritance_monthly", 0), "inheritance_monthly", 0, 1e9),
         start, sc)
 
 
@@ -89,35 +97,55 @@ def _person_months(sc, start: int) -> dict:
 
 
 def _run(you_sc, sp_sc, hh: Household, start: int) -> dict:
+    """Per month: total family cost T = joint bills + shared costs paid from personal accounts.
+    The planned inheritance offsets T; the rest is split by your share, and each person is credited
+    for the shared costs they already paid. What a person's pay cannot cover of what they owe is then
+    drawn from the remaining inheritance; their own personal-account costs above their pay are not."""
     you_net, you_n = _person_months(you_sc, start)
     sp_net, sp_n = _person_months(sp_sc, start)
-    you_fam, sp_fam, joint = (sum(a for _, a, acct in hh.expenses if acct == k) for k in ACCOUNTS)
-    you_share = joint * hh.split_you_percent / 100
-    sp_share = joint - you_share
+    exp = hh.expenses
+    cost = {k: sum(a for _, a, acct, _ in exp if acct == k) for k in ACCOUNTS}
+    shared = {k: sum(a for _, a, acct, sh in exp if acct == k and sh) for k in ("you", "spouse")}
+    joint = cost["joint"]
+    total = joint + shared["you"] + shared["spouse"]
+    pct = hh.split_you_percent / 100
     balance = hh.inheritance_balance
-    rows, tot = [], dict(you_from_pay=0.0, spouse_from_pay=0.0, inheritance_used=0.0, unfunded=0.0,
-                         you_own_shortfall=0.0, spouse_own_shortfall=0.0)
+    rows = []
+    tot = dict(you_from_pay=0.0, spouse_from_pay=0.0, inheritance_planned=0.0, inheritance_gap=0.0,
+               unfunded=0.0, you_own_shortfall=0.0, spouse_own_shortfall=0.0)
     for m in range(start, 13):
-        row = dict(month=m, joint_expenses=joint)
-        need = 0.0
-        for who, nets, fam, share in (("you", you_net, you_fam, you_share), ("spouse", sp_net, sp_fam, sp_share)):
+        planned = min(balance, hh.inheritance_monthly, total)
+        balance -= planned
+        remaining = total - planned
+        owes = {"you": remaining * pct - shared["you"], "spouse": remaining * (1 - pct) - shared["spouse"]}
+        for k, o in (("you", "spouse"), ("spouse", "you")):  # someone who paid more than their share is repaid
+            if owes[k] < 0:                                   # by the other, so the joint account still gets its total
+                owes[o] += owes[k]
+                owes[k] = 0.0
+        row = dict(month=m, joint_expenses=joint, total_cost=total, inheritance_planned=planned)
+        gaps = 0.0
+        for who, nets in (("you", you_net), ("spouse", sp_net)):
             net = nets.get(m, 0.0)
-            avail = net - fam
-            from_pay = min(share, max(0.0, avail))
-            gap = share - from_pay                      # joint bills this person's pay cannot cover
-            own = max(0.0, -avail)                      # their own budgeted costs pay cannot cover
-            need += gap                                 # only the joint gap is covered by the inheritance
-            row.update({f"{who}_net": net, f"{who}_family_expenses": fam, f"{who}_available": avail,
-                        f"{who}_share": share, f"{who}_to_joint": from_pay, f"{who}_shortfall": gap,
+            avail = net - cost[who]            # pay left after everything on their own account
+            owed = max(0.0, owes[who])
+            from_pay = min(owed, max(0.0, avail))
+            gap = owed - from_pay
+            own = max(0.0, -avail)
+            gaps += gap
+            row.update({f"{who}_net": net, f"{who}_family_expenses": cost[who], f"{who}_available": avail,
+                        f"{who}_share": owed, f"{who}_to_joint": from_pay, f"{who}_shortfall": gap,
                         f"{who}_own_shortfall": own, f"{who}_left_over": max(0.0, avail - from_pay)})
             tot[f"{who}_from_pay"] += from_pay
-            tot[f"{who}_own_shortfall"] = tot.get(f"{who}_own_shortfall", 0.0) + own
-        draw = min(balance, need)
+            tot[f"{who}_own_shortfall"] += own
+        draw = min(balance, gaps)
         balance -= draw
-        row.update(inheritance_used=draw, inheritance_balance=balance, unfunded=need - draw)
-        tot["inheritance_used"] += draw
-        tot["unfunded"] += need - draw
+        row.update(inheritance_gap=draw, inheritance_used=planned + draw, inheritance_balance=balance,
+                   unfunded=gaps - draw)
+        tot["inheritance_planned"] += planned
+        tot["inheritance_gap"] += draw
+        tot["unfunded"] += gaps - draw
         rows.append(row)
+    tot["inheritance_used"] = tot["inheritance_planned"] + tot["inheritance_gap"]
     tot["inheritance_end"] = balance
     tot["you_per_paycheck_avg"] = tot["you_from_pay"] / you_n if you_n else 0.0
     tot["spouse_per_paycheck_avg"] = tot["spouse_from_pay"] / sp_n if sp_n else 0.0
@@ -168,7 +196,8 @@ def analyze_household(you_cfg: Config, spouse_cfg: Config, hh: Household) -> dic
     warnings.extend(w for w in you.warnings if "stand-in" in w)
     return _round({"meta": {"tax_year": you_cfg.tax_year, "start_month": start,
                             "split_you_percent": hh.split_you_percent,
-                            "joint_expenses": sum(a for _, a, acct in hh.expenses if acct == "joint"),
+                            "joint_expenses": sum(a for _, a, acct, _ in hh.expenses if acct == "joint"),
+                            "inheritance_monthly": hh.inheritance_monthly,
                             "inheritance_start": hh.inheritance_balance,
                             "spouse_scenario": hh.spouse_scenario,
                             "spouse_total_additions": sp_sc.result.total_additions},

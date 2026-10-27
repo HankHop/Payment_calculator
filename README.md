@@ -73,8 +73,9 @@ The Household tab plans the shared (joint) account for two people. Your spouse i
 
 On the Household tab:
 
-- **Costs and budgets:** each monthly cost is assigned to the joint account, your personal account or your spouse's. Only the budgeted amount counts. Joint costs are split by your share and funded by each person's pay; personal costs come out of that person's own pay, and any amount above what their pay covers is not paid from the joint account or the inheritance.
-- **Inheritance:** a starting balance, drawn as needed to cover the part of a person's share of joint bills their pay cannot (for example, months where your take-home is $0 while you max out after-tax contributions). The tab shows what is used, what is left each month, and any joint bills left unfunded.
+- **Costs and budgets:** each monthly cost is assigned to the joint account, your personal account or your spouse's. Only the budgeted amount counts. A personal-account cost can be ticked as a family cost: it is then added to the total owed and credited to whoever pays it. Personal costs come out of that person's own pay, and any amount above what their pay covers is not paid from the joint account or the inheritance.
+- **How the split works:** total family cost = joint bills + shared costs paid personally. The monthly inheritance offsets that total, the rest is split by your share, and each person is credited for shared costs they already paid. Example: bills 10,000, baby clothes 100 paid by her, inheritance 4,000, split 50/50: 6,100 is split 3,050 each; she is credited 100 and owes 2,950, you owe 3,050.
+- **Inheritance:** a starting balance, an amount applied each month, and anything a person owes that their pay cannot cover (for example, months where your take-home is $0 while you max out after-tax contributions) is drawn from what remains. The tab shows what is used, what is left each month, and any joint bills left unfunded.
 - **Scenarios:** your current, recommended and what-if elections side by side, with your spouse on current or recommended.
 - **Transfers:** what each person sends to the joint account each month, and the average per paycheck.
 
