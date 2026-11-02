@@ -294,3 +294,19 @@ class RouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CutTest(unittest.TestCase):
+    def test_cut_per_month_zeroes_the_peak(self):
+        you = copy.deepcopy(EXAMPLE)
+        you["contributions"]["elections"] = [{"effective_date": "2026-01-09", "pretax_percent": 10, "posttax_percent": 90}]
+        need = run(hh(expenses=[{"name": "bills", "monthly": 40000, "account": "joint"}]), you=you)["scenarios"][0]["need"]
+        self.assertGreater(need["peak"], 0)
+        cut = need["cut_per_month"]
+        self.assertGreater(cut, 0)
+        after = run(hh(expenses=[{"name": "bills", "monthly": 40000 - cut, "account": "joint"}]), you=you)["scenarios"][0]["need"]
+        self.assertLess(after["peak"], 1.0)
+
+    def test_no_cut_when_pay_covers_costs(self):
+        need = run(hh(expenses=[{"name": "bills", "monthly": 10, "account": "joint"}]))["scenarios"][-1]["need"]
+        self.assertEqual(need["cut_per_month"], 0)

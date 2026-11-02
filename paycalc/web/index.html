@@ -853,6 +853,7 @@ function renderHH() {
       <div class="stat"><div class="k">Needed through year end</div><div class="v">${money(nd.peak, 0)}</div><div class="s">costs minus both take-home pays, at these elections</div></div>
       ${od2 ? `<div class="stat"><div class="k">For living costs</div><div class="v">${money(Math.max(0, od2.peak), 0)}</div><div class="s">at your old contribution rates</div></div>
       <div class="stat"><div class="k">For higher contributions</div><div class="v">${money(nd.extra_peak, 0)}</div><div class="s">the extra beyond old rates</div></div>` : ""}
+      ${nd.peak > 0.5 ? `<div class="stat"><div class="k">Spending cut for $0 inheritance</div><div class="v">${money(nd.cut_per_month, 0)}/mo</div><div class="s">${nd.cut_percent.toFixed(0)}% of all costs, keeping these elections</div></div>` : `<div class="stat"><div class="k">Inheritance needed</div><div class="v">$0</div><div class="s">pay covers all costs at these elections</div></div>`}
       ${bal > 0 ? `<div class="stat"><div class="k">${bal - nd.peak >= 0 ? "Not needed" : "Short by"}</div><div class="v">${money(Math.abs(bal - nd.peak), 0)}</div><div class="s">${bal - nd.peak >= 0 ? "of the " + money(bal, 0) + " balance, free to invest" : "against the " + money(bal, 0) + " balance"}</div></div>` : ""}
     </div>
     <div class="tablewrap"><table><thead><tr><th>Month</th><th>All costs</th><th>Both take-home pays</th><th>Shortfall</th><th>Running total</th></tr></thead><tbody>` +

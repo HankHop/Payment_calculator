@@ -196,12 +196,13 @@ def _need(you_sc, sp_sc, hh: Household, start: int) -> dict:
     you_net, _ = _person_months(you_sc, start)
     sp_net, _ = _person_months(sp_sc, start)
     outflow = sum(a for _, a, _, _ in hh.expenses)
-    cum = peak = 0.0
+    cum = peak = cut = 0.0
     months = []
-    for m in range(start, 13):
+    for k, m in enumerate(range(start, 13), 1):
         pay = you_net.get(m, 0.0) + sp_net.get(m, 0.0)
         cum += outflow - pay
         peak = max(peak, cum)
+        cut = max(cut, cum / k)  # flat monthly saving that keeps every running total at or below zero
         months.append(dict(month=m, outflow=outflow, pay=pay, shortfall=outflow - pay, cumulative=cum))
     rows = _run(you_sc, sp_sc, replace(hh, inheritance_balance=0.0, inheritance_monthly=0.0), start)["months"]
     by = {w: sum(r[f"{w}_shortfall"] + r[f"{w}_own_shortfall"] for r in rows) for w in ("you", "spouse")}
@@ -209,7 +210,7 @@ def _need(you_sc, sp_sc, hh: Household, start: int) -> dict:
     def contributed(sc):
         return sum(r.pretax + r.posttax for r in sc.result.rows if r.pay_date.month >= start)
 
-    return {"peak": peak, "end": cum, "months": months, "you": by["you"], "spouse": by["spouse"],
+    return {"peak": peak, "end": cum, "cut_per_month": cut, "cut_percent": (100 * cut / outflow if outflow else 0.0), "months": months, "you": by["you"], "spouse": by["spouse"],
             "you_contributions": contributed(you_sc), "spouse_contributions": contributed(sp_sc)}
 
 
