@@ -107,6 +107,18 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(run(h, you=you)["meta"]["start_month"], 11)
 
 
+class StartMonthTest(unittest.TestCase):
+    def test_semimonthly_as_of_first_of_month_keeps_that_month(self):
+        you = copy.deepcopy(EXAMPLE)
+        you["pay"]["frequency"] = "semimonthly"
+        you["as_of_date"] = "2026-11-01"
+        self.assertEqual(run(hh(start_month=None), you=you)["meta"]["start_month"], 11)
+        you["as_of_date"] = "2026-11-20"  # the 15th was already paid
+        self.assertEqual(run(hh(start_month=None), you=you)["meta"]["start_month"], 12)
+        you["as_of_date"] = "2026-12-31"
+        self.assertEqual(run(hh(start_month=None), you=you)["meta"]["start_month"], 12)
+
+
 class OverrideSolveTest(unittest.TestCase):
     def setUp(self):
         self.you = copy.deepcopy(EXAMPLE)

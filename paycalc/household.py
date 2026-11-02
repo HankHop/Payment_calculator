@@ -15,6 +15,7 @@ from .config import Config, ConfigError, parse
 from .engine import Analysis, analyze
 from . import data
 from .report import monthly
+from .schedule import pay_dates
 from .simulate import additions_cap
 
 MAX_ITEMS = 60
@@ -96,10 +97,18 @@ def parse_household(raw) -> Household:
 
 
 def _start_month(cfg: Config, hh: Household) -> int:
+    """First month still ahead of you: the first month whose first regular paycheck comes after the
+    as-of date. A month with a paycheck already paid is treated as past."""
     if hh.start_month:
         return hh.start_month
     if cfg.as_of_date:
-        return 12 if cfg.as_of_date.month == 12 else cfg.as_of_date.month + 1
+        first = {}
+        for d in pay_dates(cfg.tax_year, cfg.frequency, cfg.first_pay_date):
+            first.setdefault(d.month, d)
+        for m in range(1, 13):
+            if m in first and first[m] > cfg.as_of_date:
+                return m
+        return 12
     return 1
 
 
