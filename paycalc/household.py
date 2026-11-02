@@ -11,7 +11,9 @@ import copy
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple
 
-from .config import Config, ConfigError, parse
+from datetime import date
+
+from .config import Config, ConfigError, WhatIf, parse
 from .engine import Analysis, analyze
 from . import data
 from .report import monthly
@@ -40,6 +42,9 @@ class Household:
     # Elections to try for you from a date on: (effective_date, pretax %, after-tax %). Shown as its
     # own scenario and used by solve_posttax. It stands in for the calculator's what-if.
     you_override: Optional[Tuple[str, float, float]] = None
+    # Contribution rates before the increase, to separate the inheritance that covers living costs from
+    # the inheritance that funds higher contributions: (you pretax, you after-tax, spouse pretax, spouse after-tax).
+    old_rates: Optional[Tuple[float, float, float, float]] = None
 
 
 def _num(v, field, lo, hi) -> float:
@@ -88,12 +93,21 @@ def parse_household(raw) -> Household:
             raise ConfigError("you_override: needs an effective_date like 2026-11-15")
         override = (ov["effective_date"], _num(ov.get("pretax_percent", 0), "you_override.pretax_percent", 0, 100),
                     _num(ov.get("posttax_percent", 0), "you_override.posttax_percent", 0, 100))
+    orr = raw.get("old_rates")
+    old = None
+    if orr is not None:
+        if not isinstance(orr, dict):
+            raise ConfigError("old_rates: expected an object")
+        old = tuple(_num(orr.get(k, 0), f"old_rates.{k}", 0, 100) for k in
+                    ("you_pretax_percent", "you_posttax_percent", "spouse_pretax_percent", "spouse_posttax_percent"))
+        if old[0] + old[1] > 100 or old[2] + old[3] > 100:
+            raise ConfigError("old_rates: pretax + after-tax cannot exceed 100% for a person")
     return Household(
         _items(raw.get("expenses"), "expenses"),
         _num(raw.get("split_you_percent", 50), "split_you_percent", 0, 100),
         _num(raw.get("inheritance_balance", 0), "inheritance_balance", 0, 1e9),
         _num(raw.get("inheritance_monthly", 0), "inheritance_monthly", 0, 1e9),
-        start, sc, override)
+        start, sc, override, old)
 
 
 def _start_month(cfg: Config, hh: Household) -> int:
@@ -174,6 +188,31 @@ def _run(you_sc, sp_sc, hh: Household, start: int) -> dict:
     return {"months": rows, "totals": tot}
 
 
+def _need(you_sc, sp_sc, hh: Household, start: int) -> dict:
+    """The inheritance the household needs, ignoring the planned monthly offset and the balance: every
+    cost (joint and personal) against both take-home pays, so one person's surplus offsets the other's
+    gap. 'peak' is the most that must be on hand (the largest running shortfall); 'end' is the net at year end.
+    'you' and 'spouse' show the fair-share view: what each person's own pay cannot cover under the split."""
+    you_net, _ = _person_months(you_sc, start)
+    sp_net, _ = _person_months(sp_sc, start)
+    outflow = sum(a for _, a, _, _ in hh.expenses)
+    cum = peak = 0.0
+    months = []
+    for m in range(start, 13):
+        pay = you_net.get(m, 0.0) + sp_net.get(m, 0.0)
+        cum += outflow - pay
+        peak = max(peak, cum)
+        months.append(dict(month=m, outflow=outflow, pay=pay, shortfall=outflow - pay, cumulative=cum))
+    rows = _run(you_sc, sp_sc, replace(hh, inheritance_balance=0.0, inheritance_monthly=0.0), start)["months"]
+    by = {w: sum(r[f"{w}_shortfall"] + r[f"{w}_own_shortfall"] for r in rows) for w in ("you", "spouse")}
+
+    def contributed(sc):
+        return sum(r.pretax + r.posttax for r in sc.result.rows if r.pay_date.month >= start)
+
+    return {"peak": peak, "end": cum, "months": months, "you": by["you"], "spouse": by["spouse"],
+            "you_contributions": contributed(you_sc), "spouse_contributions": contributed(sp_sc)}
+
+
 def _round(o):
     if isinstance(o, float):
         return round(o, 2)
@@ -184,7 +223,16 @@ def _round(o):
     return o
 
 
+def _sync_as_of(you_cfg: Config, spouse_cfg: Config) -> Config:
+    """Your as-of date applies to your spouse too unless they have their own, so their recommended
+    elections start from the same point instead of from January."""
+    if you_cfg.as_of_date and spouse_cfg.as_of_date is None:
+        return replace(spouse_cfg, as_of_date=you_cfg.as_of_date)
+    return spouse_cfg
+
+
 def analyze_household(you_cfg: Config, spouse_cfg: Config, hh: Household) -> dict:
+    spouse_cfg = _sync_as_of(you_cfg, spouse_cfg)
     if you_cfg.tax_year != spouse_cfg.tax_year:
         raise ConfigError(f"both people must use the same tax_year (you {you_cfg.tax_year}, "
                           f"spouse {spouse_cfg.tax_year})")
@@ -206,8 +254,19 @@ def analyze_household(you_cfg: Config, spouse_cfg: Config, hh: Household) -> dic
     if you.what_if is not None:
         pairs.append(("what_if", "Household what-if" if hh.you_override else "Your what-if elections",
                       you.what_if))
+    old = None
+    if hh.old_rates:
+        d0 = date(you_cfg.tax_year, start, 1)
+        yo = analyze(replace(you_cfg, what_if=WhatIf(d0, hh.old_rates[0], hh.old_rates[1]))).what_if
+        so = analyze(replace(spouse_cfg, what_if=WhatIf(d0, hh.old_rates[2], hh.old_rates[3]))).what_if
+        old = _need(yo, so, hh, start)
+        old.pop("months")
     for key, label, sc in pairs:
         r = _run(sc, sp_sc, hh, start)
+        r["need"] = _need(sc, sp_sc, hh, start)
+        if old:
+            r["need"]["old"] = old
+            r["need"]["extra_peak"] = r["need"]["peak"] - old["peak"]
         r.update(key=key, label=label, you_total_additions=sc.result.total_additions,
                  you_limit_reached_on=str(sc.result.limit_reached_on) if sc.result.limit_reached_on else None,
                  you_pretax_percent=sc.plan.pretax_percent, you_posttax_percent=sc.plan.posttax_percent)
@@ -247,6 +306,7 @@ def solve_posttax(you_raw: dict, spouse_cfg: Config, hh: Household, ignore_inher
     base_cfg = parse(you_raw)
     if base_cfg.tax_year != spouse_cfg.tax_year:
         raise ConfigError("both people must use the same tax_year")
+    spouse_cfg = _sync_as_of(base_cfg, spouse_cfg)
     h = replace(hh, inheritance_balance=0.0, inheritance_monthly=0.0) if ignore_inheritance else hh
     sp_sc = getattr(analyze(spouse_cfg), hh.spouse_scenario)
     start = _start_month(base_cfg, hh)

@@ -381,6 +381,11 @@ const TIPS = {
   "h:inheritance_balance": "Total inheritance available as of the start month. The monthly amount below comes out of it, and so does any gap a person's pay cannot cover. The tab shows what is used and what is left.",
   "h:start_month": "First month to plan. Auto starts the month after your as-of date (January if there is none). Earlier months are treated as already paid.",
   "h:spouse_scenario": "Whether your spouse's pay uses their current elections or the recommended ones.",
+  "h:_hasOld": "Compares against the contribution rates you both had before raising them. Shows what part of the inheritance you need for living costs and what part only funds the higher contributions.",
+  "h:old_rates.you_pretax_percent": "The pretax % you contributed before the increase.",
+  "h:old_rates.you_posttax_percent": "The after-tax % you contributed before the increase.",
+  "h:old_rates.spouse_pretax_percent": "Your spouse's pretax % before the increase.",
+  "h:old_rates.spouse_posttax_percent": "Your spouse's after-tax % before the increase.",
   "h:_hasOverride": "Try different pretax and after-tax percentages for yourself, from a date on, without changing your saved inputs. It appears here as 'Household what-if'.",
   "h:you_override.effective_date": "The first paycheck the new percentages apply to. Payroll often takes about two weeks.",
   "h:you_override.pretax_percent": "Pretax percent to try from that date on.",
@@ -723,6 +728,12 @@ function renderHHForm() {
       </div>${e.account && e.account !== "joint" ? hchk(`expenses.${i}.shared`, "Also a family cost: add it to the total owed and credit whoever pays it") : ""}</div>`;
   });
   h += `<button data-hact="add">+ Add a cost</button></div>`;
+  const od = HH.old_rates;
+  h += `<div class="card"><h2>Compare with my old contribution rates</h2>
+    <label class="check"><input type="checkbox" data-h="_hasOld" data-t="bool" ${od ? "checked" : ""}><span>Show how much inheritance goes to living costs and how much to higher contributions</span></label>`;
+  if (od) h += `<div class="grid2">${hnum("old_rates.you_pretax_percent", "Your old pretax %")}${hnum("old_rates.you_posttax_percent", "Your old after-tax %")}${hnum("old_rates.spouse_pretax_percent", "Spouse's old pretax %")}${hnum("old_rates.spouse_posttax_percent", "Spouse's old after-tax %")}</div>
+    <div class="hint">The rates before you raised contributions, applied from the start month. The difference in inheritance needed is the cost of the higher contributions.</div>`;
+  h += `</div>`;
   const ov = HH.you_override;
   h += `<div class="card"><h2>Try your own elections</h2>
     <label class="check"><input type="checkbox" data-h="_hasOverride" data-t="bool" ${ov ? "checked" : ""}><span>Use different pretax and after-tax percentages for me</span></label>`;
@@ -763,6 +774,10 @@ function overrideDefaults() {
 }
 function onHHEdit(ev) {
   const el = ev.target, p = el.dataset.h; if (!p) return;
+  if (p === "_hasOld") {
+    if (el.checked) HH.old_rates = {you_pretax_percent: 0, you_posttax_percent: 0, spouse_pretax_percent: 0, spouse_posttax_percent: 0}; else delete HH.old_rates;
+    renderHHForm(); return scheduleHH();
+  }
   if (p === "_hasOverride") {
     if (el.checked) { HH.you_override = overrideDefaults(); HHVIEW = "what_if"; } else { delete HH.you_override; if (HHVIEW === "what_if") HHVIEW = "current"; }
     renderHHForm(); return scheduleHH();
@@ -832,6 +847,18 @@ function renderHH() {
   const t = sc.totals, m = d.meta;
   let h = "";
   if (d.warnings.length) h += `<div class="notice"><ul class="warnlist">${d.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`;
+  const nd = sc.need, od2 = nd.old, bal = m.inheritance_start;
+  h += `<div class="card"><h2>Inheritance you need, ${MN[m.start_month]} to Dec</h2>
+    <div class="stats">
+      <div class="stat"><div class="k">Needed through year end</div><div class="v">${money(nd.peak, 0)}</div><div class="s">costs minus both take-home pays, at these elections</div></div>
+      ${od2 ? `<div class="stat"><div class="k">For living costs</div><div class="v">${money(Math.max(0, od2.peak), 0)}</div><div class="s">at your old contribution rates</div></div>
+      <div class="stat"><div class="k">For higher contributions</div><div class="v">${money(nd.extra_peak, 0)}</div><div class="s">the extra beyond old rates</div></div>` : ""}
+      ${bal > 0 ? `<div class="stat"><div class="k">${bal - nd.peak >= 0 ? "Not needed" : "Short by"}</div><div class="v">${money(Math.abs(bal - nd.peak), 0)}</div><div class="s">${bal - nd.peak >= 0 ? "of the " + money(bal, 0) + " balance, free to invest" : "against the " + money(bal, 0) + " balance"}</div></div>` : ""}
+    </div>
+    <div class="tablewrap"><table><thead><tr><th>Month</th><th>All costs</th><th>Both take-home pays</th><th>Shortfall</th><th>Running total</th></tr></thead><tbody>` +
+    nd.months.map((r) => `<tr><td>${MN[r.month]}</td><td>${money(r.outflow, 0)}</td><td>${money(r.pay, 0)}</td><td>${money(r.shortfall, 0)}</td><td>${money(r.cumulative, 0)}</td></tr>`).join("") +
+    `</tbody></table></div>
+    <div class="foot">Needed is the most that has to be on hand: every joint and personal cost against both take-home pays, so one person's spare pay offsets the other's gap. It ignores the monthly inheritance offset above. Fair-share view (what each person's own pay cannot cover under the split): you ${money(nd.you, 0)}, spouse ${money(nd.spouse, 0)}. Contributions made in these months: you ${money(nd.you_contributions, 0)}${od2 ? " (" + money(od2.you_contributions, 0) + " at old rates)" : ""}, spouse ${money(nd.spouse_contributions, 0)}${od2 ? " (" + money(od2.spouse_contributions, 0) + " at old rates)" : ""}.</div></div>`;
   h += `<div class="card"><h2>Scenarios, ${MN[m.start_month]} to Dec</h2><div class="tablewrap"><table><thead><tr><th>Your elections</th><th>Pretax / post-tax</th><th>Your total additions</th><th>Limit reached</th><th>You send to joint</th><th>Spouse sends</th><th>Inheritance used</th><th>Inheritance left</th><th>Unfunded</th></tr></thead><tbody>` +
     d.scenarios.map((x) => `<tr><td>${esc(x.label)}</td><td>${x.you_pretax_percent}% / ${x.you_posttax_percent}%</td><td>${money(x.you_total_additions, 0)}</td><td>${esc(x.you_limit_reached_on || "-")}</td><td>${money(x.totals.you_from_pay, 0)}</td><td>${money(x.totals.spouse_from_pay, 0)}</td><td>${money(x.totals.inheritance_used, 0)}</td><td>${money(x.totals.inheritance_end, 0)}</td><td class="${x.totals.unfunded > 0.005 ? "bad" : ""}">${money(x.totals.unfunded, 0)}</td></tr>`).join("") +
     `</tbody></table></div></div>`;

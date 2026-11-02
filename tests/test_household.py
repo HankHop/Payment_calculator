@@ -107,6 +107,51 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(run(h, you=you)["meta"]["start_month"], 11)
 
 
+class NeedTest(unittest.TestCase):
+    def test_need_is_costs_minus_both_pays_and_ignores_offset(self):
+        h = hh(expenses=[{"name": "bills", "monthly": 9000, "account": "joint"},
+                         {"name": "mine", "monthly": 500, "account": "you"}],
+               start_month=11, inheritance_balance=100000, inheritance_monthly=5000)
+        r = run(h)["scenarios"][-1]
+        n = r["need"]
+        for m in n["months"]:
+            mo = [x for x in r["months"] if x["month"] == m["month"]][0]
+            self.assertAlmostEqual(m["pay"], mo["you_net"] + mo["spouse_net"], places=1)
+            self.assertAlmostEqual(m["shortfall"], 9500 - m["pay"], places=1)
+        cum = peak = 0.0
+        for m in n["months"]:
+            cum += m["shortfall"]; peak = max(peak, cum)
+        self.assertAlmostEqual(n["peak"], peak, places=1)
+
+    def test_surplus_in_one_month_does_not_create_negative_peak(self):
+        n = run(hh(expenses=[{"name": "tiny", "monthly": 10, "account": "joint"}], start_month=11))["scenarios"][-1]["need"]
+        self.assertEqual(n["peak"], 0.0)
+        self.assertLess(n["end"], 0)
+
+    def test_old_rates_separate_living_costs_from_contributions(self):
+        spouse = copy.deepcopy(EXAMPLE)
+        h = hh(expenses=[{"name": "bills", "monthly": 4000, "account": "joint"}], start_month=7,
+               old_rates={"you_pretax_percent": 5, "you_posttax_percent": 0,
+                          "spouse_pretax_percent": 5, "spouse_posttax_percent": 0})
+        sc = run(h, spouse=spouse)["scenarios"][0]
+        n = sc["need"]
+        self.assertIn("old", n)
+        self.assertAlmostEqual(n["extra_peak"], n["peak"] - n["old"]["peak"], places=1)
+        self.assertGreaterEqual(n["peak"], n["old"]["peak"])
+
+    def test_old_rates_validation(self):
+        for bad in ({"old_rates": 5}, {"old_rates": {"you_pretax_percent": 80, "you_posttax_percent": 30}},
+                    {"old_rates": {"spouse_pretax_percent": -1}}):
+            with self.assertRaises(ConfigError):
+                H.parse_household(bad)
+
+    def test_your_as_of_date_applies_to_spouse(self):
+        you = copy.deepcopy(EXAMPLE)
+        you["as_of_date"] = "2026-09-01"
+        r = H.analyze_household(parse(you), parse(copy.deepcopy(EXAMPLE)), hh(spouse_scenario="recommended"))
+        self.assertTrue(r["scenarios"])
+
+
 class StartMonthTest(unittest.TestCase):
     def test_semimonthly_as_of_first_of_month_keeps_that_month(self):
         you = copy.deepcopy(EXAMPLE)
